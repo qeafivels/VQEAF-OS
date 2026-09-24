@@ -1,3 +1,15 @@
+# VQEAF OS v2.4.2 — QEAPP / browser / theme core recovery
+
+This update fixes the source-level flows used for installing signed `.qeapp` packages,
+browsing/downloading small HTML pages, and importing/applying `.vqeaf` themes.
+It preserves N16R8 board GPIO, portrait 240×320 UI, RGB565/RLE pixel icons,
+existing QEAPP/2 signature checks and theme syntax. This is **not** a Symbian
+SIS/SISX or full JavaScript browser runtime. Details: `docs/CORE_FIX_V242_VN.md`.
+
+Run `python3 tools/verify_v242.py` and `python3 tools/doctor_v242.py`.
+PlatformIO target compilation, actual TLS, SD, and ESP32-S3 hardware behavior
+must still be verified on a physical board; host tests cannot establish these.
+
 # VQEAF OS v2.4.0 — Signed application manager (S60-inspired)
 
 New: verified QEAPP/2 update/rollback recovery, app version comparison,

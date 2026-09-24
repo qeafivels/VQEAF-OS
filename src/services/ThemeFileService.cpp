@@ -113,7 +113,7 @@ bool ThemeFileService::parse(File &file, ThemeColors &out, String &name, String 
   LauncherStyle overrides = LauncherStyle::fromPalette(c);
   uint16_t overrideMask = 0;
   char line[320];
-  bool magic=false, paletteFound=false, paletteOpen=false, palettePending=false;
+  bool magic=false, themeOpened=false, paletteFound=false, paletteOpen=false, palettePending=false;
   bool launcherOpen=false, launcherPending=false;
   bool screen=false, accent=false, text=false, hasDim=false, hasPopup=false;
   size_t bytes=0;
@@ -139,13 +139,16 @@ bool ThemeFileService::parse(File &file, ThemeColors &out, String &name, String 
       error=tooLong?"Theme header line too long":"Theme read failed";return false;
     }
     char *s=trimLine(line);
-    if (!magic && (unsigned char)s[0]==0xEF && (unsigned char)s[1]==0xBB && (unsigned char)s[2]==0xBF)s+=3;
+    if (!magic && strlen(s)>=3 && (unsigned char)s[0]==0xEF &&
+        (unsigned char)s[1]==0xBB && (unsigned char)s[2]==0xBF)s+=3;
     if (!*s || s[0]=='#' || (s[0]=='/'&&s[1]=='/'))continue;
     if (!magic) {
       if (strncmp(s,"@vqeaf 1.",9)) {error="Expected @vqeaf 1.x";return false;}
       magic=true;continue;
     }
-    if (strncmp(s,"<theme ",7)==0) {
+    if (strncmp(s,"<theme ",7)==0 || !strcmp(s,"<theme>")) {
+      if(themeOpened) {error="Repeated <theme> tag";return false;}
+      themeOpened=true;
       const char *val=strstr(s,"name=");char label[40];
       if(val && readQuoted(val+5,label,sizeof label))name=label;
       continue;
@@ -201,7 +204,7 @@ bool ThemeFileService::parse(File &file, ThemeColors &out, String &name, String 
     else if(!strcmp(key,"accent")){c.accent=color;accent=true;}
     else if(!strcmp(key,"glow"))c.danger=color;
   }
-  if (!magic || !paletteFound || paletteOpen || launcherOpen || palettePending || launcherPending ||
+  if (!magic || !themeOpened || !paletteFound || paletteOpen || launcherOpen || palettePending || launcherPending ||
       !screen || !accent || !text) {error="Theme needs complete palette screen/keyText/accent";return false;}
   if (!hasDim)c.dim=c.text;
   if (!hasPopup)c.popup=c.panel;
@@ -232,32 +235,22 @@ int ThemeFileService::scan(StorageService &storage) {
     for (int i = 0; i < n && used < MAX_THEMES; ++i) {
       if (!isVqeafPath(found[i].path) || found[i].size > MAX_FILE_BYTES ||
           find(found[i].path) >= 0) continue;
-      // Bad extension or random binary .vqeaf must not use a catalog slot.
-      { File probe=storage.fs().open(found[i].path,FILE_READ);
-        uint8_t magic[16]={0};size_t n=probe?probe.read(magic,15):0;
-        if(probe)probe.close();
-        size_t b=(n>=3 && magic[0]==0xEF && magic[1]==0xBB && magic[2]==0xBF)?3:0;
-        if(n-b<9 || memcmp(magic+b,"@vqeaf 1.",9)!=0)continue;
-      }
+      // Validate BEFORE consuming a catalog slot. Previously a malformed
+      // .vqeaf with a matching magic header was listed as installable and
+      // failed only when the user pressed Apply. Do not read image resources
+      // into RAM; parse() uses bounded, streaming palette extraction.
+      File file = storage.fs().open(found[i].path, FILE_READ);
+      if (!file || file.isDirectory()) { if (file) file.close(); continue; }
+      ThemeColors validated;
+      LauncherStyle skin;
+      String label, failure;
+      const bool acceptable = parse(file, validated, label, failure, &skin);
+      file.close();
+      if (!acceptable) continue;
       Entry &e = entries[used];
       snprintf(e.path, sizeof e.path, "%s", found[i].path.c_str());
-      snprintf(e.label, sizeof e.label, "%s", found[i].name.c_str());
+      snprintf(e.label, sizeof e.label, "%s", label.length() ? label.c_str() : found[i].name.c_str());
       e.bytes = (uint32_t)found[i].size;
-      File file = storage.fs().open(found[i].path, FILE_READ);
-      if (file) {
-        char b[320]; size_t got = file.read((uint8_t *)b, sizeof(b) - 1);
-        b[got] = 0;
-        const char *p = strstr(b, "<theme ");
-        if (p) {
-          const char *n = strstr(p, "name=");
-          if (n) {
-            char label[40];
-            if (readQuoted(n + 5, label, sizeof label))
-              snprintf(e.label, sizeof e.label, "%s", label);
-          }
-        }
-        file.close();
-      }
       ++used;
     }
   }

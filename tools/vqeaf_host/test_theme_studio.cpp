@@ -48,7 +48,8 @@ int main(int argc,char **argv) {
   fakeThemeFiles["/Themes/invalid.vqeaf"] =
       "@vqeaf 1.0\n<theme name=\"oops\">\npalette {\nscreen: \"#HI1234\"\n"
       "keyText: \"#FFFFFF\"\naccent: \"#55FF00\"\n}\n</theme>";
-  StorageService sd;assert(sd.begin());ThemeFileService service;assert(service.scan(sd)==6);
+  StorageService sd;assert(sd.begin());ThemeFileService service;assert(service.scan(sd)==5);
+  assert(service.find("/Themes/invalid.vqeaf")<0);
   ThemeColors c=themeFor(ThemeId::Classic);
   LauncherStyle skin;String name,error;
   assert(service.load(sd,"/Themes/night.vqeaf",c,name,error,&skin));

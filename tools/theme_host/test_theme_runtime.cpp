@@ -55,7 +55,8 @@ int main(int argc,char **argv) {
       "\xEF\xBB\xBF@vqeaf 1.0\n<theme name=\"BOM file\">\npalette {\nscreen: \"#123456\"\nkeyText: \"#FFFFFF\"\naccent: \"#FF0000\"\n}\n</theme>\n";
     StorageService sd; assert(sd.begin());
     ThemeFileService service; int count=service.scan(sd);
-    assert(service.hasCard() && count == 5); // huge excluded, duplicates removed
+    assert(service.hasCard() && count == 4); // huge excluded, duplicates removed
+    assert(service.find("/Themes/bad.vqeaf") < 0);
     int red = service.find("/Themes/amoled_red.vqeaf");
     int green = service.find("/Themes/s60_green.vqeaf");
     assert(red >= 0 && green >= 0);
@@ -82,6 +83,6 @@ int main(int argc,char **argv) {
     assert(!service.load(sd,"/Themes/../bad.vqeaf",c,title,error));
     assert(!service.load(sd,"/Themes/missing.vqeaf",c,title,error));
     assert(!service.load(sd,"/Themes/amoled_red.txt",c,title,error));
-    std::cout << "PASS: scan 5 valid-sized themes, dedup, palette imports, BOM,"
+    std::cout << "PASS: scan 4 validated themes (malformed skipped), dedup, palette imports, BOM,"
               << " safe fallback, invalid/oversized/path rejection\n";
 }

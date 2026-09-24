@@ -33,7 +33,10 @@ public:
   bool pageFromCache() const { return cachedPage; }
 
   const char *title() const { return pageTitle; }
-  const char *url() const { return currentUrl; }
+  const char *url() const { return retryPending ? requestedUrl : currentUrl; }
+  // Navigation failure keeps the requested URL so Reload retries the failing
+  // address instead of unexpectedly opening the previous page.
+  bool hasPendingRetry() const { return retryPending; }
   int status() const { return httpStatus; }
   const char *error() const { return errorText; }
   int lineCount() const { return lineUsed; }
@@ -55,6 +58,8 @@ private:
   bool cachedPage = false;
   int historyUsed = 0;
   char currentUrl[192] = {0};
+  char requestedUrl[192] = {0};
+  bool retryPending = false;
   char pageTitle[64] = {0};
   char errorText[80] = {0};
   int httpStatus = 0;

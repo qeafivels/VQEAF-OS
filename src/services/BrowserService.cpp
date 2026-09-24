@@ -3,6 +3,7 @@
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include "TrustedTls.h"
+#include "HttpChunkedDecoder.h"
 #include <esp_heap_caps.h>
 #include <ctype.h>
 #include <new>
@@ -196,6 +197,7 @@ bool BrowserService::begin(StorageService *storageRef) {
   }
   resetPage();
   cachedPage = false;
+  historyUsed = 0; requestedUrl[0] = 0; retryPending = false;
   snprintf(currentUrl, sizeof(currentUrl), "%s", "https://qeafivels.com/");
   return true;
 }
@@ -306,6 +308,8 @@ bool BrowserService::download(const String &inputUrl, String &savedPath, String 
     HTTPClient http;
     http.setConnectTimeout(9000); http.setTimeout(20000);
     http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
+    const char *transferHeaders[]={"Transfer-Encoding"};
+    http.collectHeaders(transferHeaders,1);
     http.setUserAgent("Opera/9.80 (J2ME/MIDP; Opera Mini/4.5; U; vi) Qeafbrowser-VQEAF/2.1");
     if (strncasecmp(requestUrl, "https://", 8)) {
       error = "Unsafe redirect: HTTPS required"; break;
@@ -326,26 +330,71 @@ bool BrowserService::download(const String &inputUrl, String &savedPath, String 
     if (code <= 0) { error = "HTTPS verification or connection failed"; http.end(); break; }
     if (code < 200 || code >= 300) { error = String("HTTP ") + code; http.end(); break; }
     const int len = http.getSize();
-    const int32_t MAX_DOWNLOAD = 4 * 1024 * 1024;
-    if (len <= 0) { error = "Download requires Content-Length"; http.end(); break; }
-    if (len > MAX_DOWNLOAD) { error = "File exceeds 4 MB limit"; http.end(); break; }
+    static const int32_t MAX_DOWNLOAD = 4 * 1024 * 1024;
+    String transfer = http.header("Transfer-Encoding");
+    transfer.toLowerCase();
+    const bool chunked=transfer.indexOf("chunked")>=0;
+    if (len <= 0 && !chunked) {
+      error = "Download needs Content-Length or chunked transfer";
+      http.end(); break;
+    }
+    if (len > MAX_DOWNLOAD && !chunked) {error = "File exceeds 4 MB limit"; http.end(); break;}
     File out = storage->fs().open(tmpPath, FILE_WRITE);
     if (!out) { error = "Cannot create download file"; http.end(); break; }
     WiFiClient *stream = http.getStreamPtr();
-    uint8_t buf[512]; int32_t total = 0; uint32_t lastData = millis();
+    uint8_t buf[512]; int32_t total = 0;
+    const uint32_t responseStart=millis();uint32_t lastData=responseStart;
     bool failed = false;
-    while (http.connected() && (len < 0 || total < len)) {
-      size_t avail = stream->available();
-      if (!avail) { if (millis() - lastData > 3000UL) break; delay(1); continue; }
-      size_t want = min(avail, sizeof(buf));
-      int n = stream->readBytes(buf, want);
-      if (n <= 0) continue;
-      if (total + n > MAX_DOWNLOAD || out.write(buf, n) != (size_t)n) { failed = true; break; }
-      total += n; lastData = millis();
+    if (chunked) {
+      // Stream chunks through a 512-byte stack buffer into a .part file;
+      // never allocate the whole app (up to 4 MB) in PSRAM or trust an
+      // unknown-size HTTP response. Hash/signature is checked by installer.
+      bool timedOut=false;
+      auto readByte=[&]()->int {
+        while(true) {
+          const uint32_t now=millis();
+          if((uint32_t)(now-responseStart)>180000UL ||
+             (uint32_t)(now-lastData)>10000UL) {timedOut=true;return -1;}
+          if(stream->available()) {
+            int c=stream->read();
+            if(c>=0) {lastData=millis();return c;}
+          }
+          if(!http.connected())return -1;
+          delay(1);
+        }
+      };
+      auto sink=[&](const uint8_t *bytes,size_t n)->bool {
+        if(!storage->mounted())return false;
+        return out.write(bytes,n)==n;
+      };
+      uint32_t decoded=0;const char *frameError="";
+      if(!HttpChunkedDecoder::decodeTo(readByte,sink,MAX_DOWNLOAD,decoded,frameError)) {
+        failed=true;
+        error=timedOut ? "Download timed out" : frameError;
+      }
+      total=(int32_t)decoded;
+    }else{
+      // Declared-length transfers: never publish a partial `.qeapp` or
+      // `.vqeaf`. Drain buffered bytes even after peer closed TCP.
+      while ((http.connected() || stream->available()) && total<len) {
+        const uint32_t now=millis();
+        if((uint32_t)(now-responseStart)>180000UL ||
+           (uint32_t)(now-lastData)>10000UL){error="Download timed out";failed=true;break;}
+        size_t avail=stream->available();
+        if(!avail) {delay(1);continue;}
+        size_t want=min(avail,sizeof(buf));
+        if(total+(int32_t)want>len)want=len-total;
+        int n=stream->readBytes(buf,want);
+        if(n<=0)continue;
+        if(total+n>MAX_DOWNLOAD || out.write(buf,n)!=(size_t)n) {
+          error="Download write or size limit failed";failed=true;break;
+        }
+        total+=n;lastData=millis();
+      }
     }
     out.flush(); out.close(); http.end();
     if (!storage->mounted()) { failed = true; error = "microSD was removed"; }
-    if (failed || total <= 0 || (len >= 0 && total != len)) {
+    if (failed || total <= 0 || (!chunked && total != len)) {
       storage->fs().remove(tmpPath);
       if (!error.length()) error = failed ? "Download write failed" : "Download incomplete";
       break;
@@ -389,10 +438,13 @@ bool BrowserService::load(const String &inputUrl) {
     snprintf(errorText, sizeof(errorText), "Invalid address");
     return false;
   }
+  snprintf(requestedUrl, sizeof(requestedUrl), "%s", normalized);
+  retryPending = true;
   return fetchAndParse(normalized, true);
 }
 
 bool BrowserService::reload() {
+  if (retryPending && requestedUrl[0]) return fetchAndParse(requestedUrl, true);
   if (!currentUrl[0]) return load("https://qeafivels.com/");
   return fetchAndParse(currentUrl, false);
 }
@@ -400,9 +452,11 @@ bool BrowserService::reload() {
 bool BrowserService::goBack() {
   if (historyUsed < 2) return false;
   char target[192]; snprintf(target, sizeof(target), "%s", history[1]);
+  // Leave history untouched on transport/TLS errors. The user can retry.
+  if (!fetchAndParse(target, false)) return false;
   for (int i = 1; i < historyUsed - 1; ++i) snprintf(history[i], sizeof(history[i]), "%s", history[i + 1]);
   --historyUsed;
-  return fetchAndParse(target, false);
+  return true;
 }
 
 bool BrowserService::openLink(int index) {
@@ -411,6 +465,18 @@ bool BrowserService::openLink(int index) {
 }
 
 bool BrowserService::fetchAndParse(const char *url, bool addHistory) {
+  // Capture link URLs *before* resetPage() clears the fixed link pool. A
+  // clicked link points into links[index].url, so using that original pointer
+  // after resetPage() produced an empty/invalid request on the next fetch.
+  if (!url || !url[0] || strlen(url) >= sizeof(requestedUrl)) {
+    snprintf(errorText, sizeof(errorText), "Invalid address");
+    return false;
+  }
+  char targetUrl[192];
+  snprintf(targetUrl, sizeof(targetUrl), "%s", url);
+  snprintf(requestedUrl, sizeof(requestedUrl), "%s", targetUrl);
+  retryPending = true;
+  url = targetUrl;
   resetPage();
   if (!poolsReady || !lines || !links || !history) {
     snprintf(errorText, sizeof(errorText), "Browser memory unavailable");
@@ -425,6 +491,7 @@ bool BrowserService::fetchAndParse(const char *url, bool addHistory) {
     if (cached && loadCache(url, cached, BODY_CAP, cachedLen)) {
       snprintf(currentUrl, sizeof(currentUrl), "%s", url);
       if (addHistory) pushHistory(currentUrl);
+      retryPending = false;
       parseHtml(cached, cachedLen);
       free(cached); httpStatus = 200; cachedPage = true;
       if (!pageTitle[0]) snprintf(pageTitle, sizeof(pageTitle), "%s", "Cached page");
@@ -456,8 +523,8 @@ bool BrowserService::fetchAndParse(const char *url, bool addHistory) {
     http.setConnectTimeout(9000);
     http.setTimeout(15000);
     http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
-    const char *wantedHeaders[] = {"Content-Type"};
-    http.collectHeaders(wantedHeaders, 1);
+    const char *wantedHeaders[] = {"Content-Type", "Transfer-Encoding"};
+    http.collectHeaders(wantedHeaders, 2);
     http.setUserAgent("Opera/9.80 (J2ME/MIDP; Opera Mini/4.5; U; vi) Qeafbrowser-VQEAF/2.1");
 
     WiFiClient plain;
@@ -505,6 +572,7 @@ bool BrowserService::fetchAndParse(const char *url, bool addHistory) {
       }
       http.end();
       snprintf(requestUrl, sizeof(requestUrl), "%s", nextUrl);
+      if (retryPending) snprintf(requestedUrl, sizeof(requestedUrl), "%s", requestUrl);
       if (hop == 5) snprintf(errorText, sizeof(errorText), "Too many redirects");
       continue;
     }
@@ -522,6 +590,7 @@ bool BrowserService::fetchAndParse(const char *url, bool addHistory) {
       break;
     }
     String ctype = http.header("Content-Type");
+    ctype.toLowerCase();
     if (ctype.length() && ctype.indexOf("text/") < 0 && ctype.indexOf("html") < 0 &&
         ctype.indexOf("xml") < 0 && ctype.indexOf("wap") < 0) {
       snprintf(errorText, sizeof(errorText), "Unsupported content type");
@@ -534,24 +603,64 @@ bool BrowserService::fetchAndParse(const char *url, bool addHistory) {
     const uint32_t responseStart = millis();
     uint32_t lastData = responseStart;
     bool timedOut = false;
-    while (http.connected() && used < BODY_CAP - 1 &&
-           (declaredBytes < 0 || used < (size_t)declaredBytes)) {
-      if (millis() - responseStart > 25000UL || millis() - lastData > 8000UL) {
-        timedOut = true;
-        break;
+    String transfer = http.header("Transfer-Encoding");
+    transfer.toLowerCase();
+    if (transfer.indexOf("chunked") >= 0) {
+      // HTTPClient::getStreamPtr returns the underlying raw TCP stream on
+      // Arduino-ESP32; a chunked body must be de-framed before HTML parsing.
+      // The parser streams directly into the existing 32-KiB PSRAM buffer.
+      bool timedOutDuringChunk = false;
+      auto readByte = [&]() -> int {
+        while (true) {
+          const uint32_t now = millis();
+          if ((uint32_t)(now-responseStart) > 25000UL ||
+              (uint32_t)(now-lastData) > 8000UL) {
+            timedOutDuringChunk = true; return -1;
+          }
+          if (stream->available()) {
+            int c = stream->read();
+            if (c >= 0) {lastData = millis(); return c;}
+          }
+          if (!http.connected()) return -1;
+          delay(1);
+        }
+      };
+      const char *decodeError = nullptr;
+      const bool decoded = HttpChunkedDecoder::decode(readByte, body, BODY_CAP, used, decodeError);
+      if (!decoded) {
+        snprintf(errorText, sizeof(errorText), "%s", timedOutDuringChunk ?
+                 "Chunked response timeout" : decodeError);
+        http.end(); break;
       }
-      size_t avail = stream->available();
-      if (avail) {
-        size_t room = BODY_CAP - 1 - used;
-        size_t want = avail < room ? avail : room;
-        int n = stream->readBytes(body + used, want);
-        if (n > 0) { used += (size_t)n; lastData = millis(); }
-      } else {
-        delay(1);
+    } else {
+      // HTTP/1.0 close-delimited and declared Content-Length bodies.
+      while ((http.connected() || stream->available()) && used < BODY_CAP - 1 &&
+             (declaredBytes < 0 || used < (size_t)declaredBytes)) {
+        if ((uint32_t)(millis() - responseStart) > 25000UL ||
+            (uint32_t)(millis() - lastData) > 8000UL) {
+          timedOut = true;
+          break;
+        }
+        size_t avail = stream->available();
+        if (avail) {
+          size_t room = BODY_CAP - 1 - used;
+          size_t want = avail < room ? avail : room;
+          int n = stream->readBytes(body + used, want);
+          if (n > 0) { used += (size_t)n; lastData = millis(); }
+        } else delay(1);
       }
+      body[used] = 0;
     }
-    body[used] = 0;
     http.end();
+    if (timedOut) {
+      snprintf(errorText, sizeof(errorText), "Page request timeout");
+      break;
+    }
+    if (!used) {
+      snprintf(errorText, sizeof(errorText), "%s", "Empty HTML response");
+      break;
+    }
+    if (transfer.indexOf("chunked") >= 0) {success = true; break;}
     if (timedOut || (declaredBytes >= 0 && used != (size_t)declaredBytes) ||
         used == BODY_CAP - 1) {
       snprintf(errorText, sizeof(errorText), "%s", timedOut ? "Page request timeout" : "Page truncated");
@@ -566,6 +675,7 @@ bool BrowserService::fetchAndParse(const char *url, bool addHistory) {
     if (allowOfflineCache && loadCache(url, body, BODY_CAP, cachedLen)) {
       snprintf(currentUrl, sizeof(currentUrl), "%s", url);
       if (addHistory) pushHistory(currentUrl);
+      retryPending = false;
       parseHtml(body, cachedLen);
       free(body); httpStatus = 200; cachedPage = true;
       if (!pageTitle[0]) snprintf(pageTitle, sizeof(pageTitle), "%s", "Cached page");
@@ -577,12 +687,16 @@ bool BrowserService::fetchAndParse(const char *url, bool addHistory) {
 
   snprintf(currentUrl, sizeof(currentUrl), "%s", requestUrl);
   if (addHistory) pushHistory(currentUrl);
+  retryPending = false;
   saveCache(currentUrl, body, used);
+  const bool needsJavaScript = strstr(body, "<script") != nullptr;
   parseHtml(body, used);
   free(body);
 
   if (!pageTitle[0]) snprintf(pageTitle, sizeof(pageTitle), "%s", "Web page");
-  if (!lineUsed) addWrappedText("Page contains no displayable text.");
+  if (!lineUsed) addWrappedText(needsJavaScript ?
+      "This page requires JavaScript; Qeafbrowser supports HTML text only." :
+      "Page contains no displayable text.");
   return httpStatus >= 200 && httpStatus < 300;
 }
 
@@ -592,7 +706,8 @@ int BrowserService::addLink(const char *href, const char *label) {
   if (!resolveUrl(currentUrl, href, absUrl, sizeof(absUrl))) return -1;
   int i = linkUsed++;
   snprintf(links[i].url, sizeof(links[i].url), "%s", absUrl);
-  snprintf(links[i].label, sizeof(links[i].label), "%s", (label && label[0]) ? label : absUrl);
+  snprintf(links[i].label, sizeof(links[i].label), "%.*s",
+           int(sizeof(links[i].label)-1), (label && label[0]) ? label : absUrl);
   return i;
 }
 

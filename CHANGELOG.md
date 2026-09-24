@@ -1,3 +1,16 @@
+## v2.4.2 — Verified QEAPP, network downloads and theme recovery (2026-09-24)
+
+- Discover signed `.qeapp` files in inbox, Downloads and the microSD root, with
+  explicit layout and signing-key mismatch diagnostics; never bypass signatures.
+- Preserve clicked browser URLs across link-pool reset and retain retry/history
+  for failed requests. Support bounded chunked transfer for pages and downloads.
+- Validate `.vqeaf` palette/envelope during catalog scan; leave the currently
+  applied palette in place when a candidate fails and route theme downloads to
+  manual Apply.
+- Expose `corediag` and boot-time checks for SD/WiFi/TLS/signing key.
+- Add host verification/doctor tooling. Host gate: 17/17 passing; v2.4.0 gate:
+  7/7 passing. Hardware test and real PlatformIO build still pending.
+
 ## v2.4.0 — S60-inspired package manager core
 - Signed QEAPP/2 higher-version update with staged verification and last-version backup.
 - Recovery of interrupted installs/updates; never promote unconfirmed staging.

@@ -20,6 +20,7 @@
 #include "services/WiFiProfileStore.h"
 #include "services/ShellService.h"
 #include "services/BoardDiagnostics.h"
+#include "services/TrustedTls.h"
 #include "services/ThemeFileService.h"
 #include "services/AppInstallerService.h"
 #include "services/QeappDataService.h"
@@ -316,7 +317,7 @@ static void drawSplash() {
   d.setTextFont(1); d.setCursor(66,158); d.print("ESP32-S3 / 240x320");
   d.drawRect(25,205,190,12,c.dim);
   d.fillRect(27,207,160,8,c.accent);
-  d.setCursor(52,229); d.print("VQEAF OS v2.4.0");
+  d.setCursor(52,229); d.print("VQEAF OS v2.4.2");
 }
 
 static ScreenId idleShortcutTarget() {
@@ -465,7 +466,22 @@ void setup() {
     storage.ensureSystemLayout();
     Serial.println("SD layout: /System/{Cache,Themes,Apps,Downloads,Logs,Temp} + /Media + /Documents");
   }
+  // Field diagnostics at 115200 baud: do not report a runtime as healthy
+  // when the card mounts read-only, the inbox is missing, or the clock is unset.
+  if (sdOk) {
+    const char *requiredDirs[] = {StoragePaths::THEMES,StoragePaths::APPS_INBOX,
+       StoragePaths::APPS_INSTALLED,StoragePaths::CACHE_WEB};
+    for (const char *path : requiredDirs) {
+      File probe=storage.fs().open(path,FILE_READ);
+      bool ready=probe && probe.isDirectory();
+      if (probe)probe.close();
+      Serial.printf("[VQEAF][CORE][SD] path=%s status=%s\n",path,ready?"OK":"MISSING_OR_READONLY");
+    }
+  }else Serial.println("[VQEAF][CORE][SD] NOT_MOUNTED: browser downloads, apps and themes unavailable");
   browserCoreOk = systemService.safeMode() ? false : browserService.begin(&storage);
+  Serial.printf("[VQEAF][CORE][BROWSER] state=%s safe_mode=%d wifi=%d clock=%s\n",
+      browserCoreOk?"READY":"UNAVAILABLE",systemService.safeMode(),WiFi.status(),
+      TrustedTls::timeValidAt(time(nullptr))?"VALID":"NTP_PENDING");
   if (settings.data().theme == ThemeId::External) {
     ThemeColors themePalette;
     LauncherStyle launcherSkin;
@@ -483,11 +499,16 @@ void setup() {
       Serial.printf("Custom theme unavailable: %s\n", loadError.c_str());
     }
   }
+  if (sdOk) {
+    const int availableThemes=themeFiles.scan(storage);
+    Serial.printf("[VQEAF][CORE][THEMES] validated=%d (malformed skipped)\n",availableThemes);
+  }
   Serial.printf("SD: %s\n", sdOk ? "mounted" : "not mounted");
   Serial.printf("[S3DIAG][BOOT] sd=%s errors=%u\n", sdOk ? "mounted" : "offline", storage.ioErrors());
   Serial.println("[S3DIAG] Type diag help at 115200; only test idle media");
   notifications.push("Storage", sdOk ? "microSD mounted" : "microSD not mounted");
   appInstaller.begin(storage);
+  Serial.printf("[VQEAF][CORE][QEAPP] verified_installed=%d (signature required)\n",appInstaller.count());
   appData.begin(storage, appInstaller);
   const auto recovery=appInstaller.recoveryStats();
   if(recovery.restored||recovery.blocked||recovery.discardedStages){

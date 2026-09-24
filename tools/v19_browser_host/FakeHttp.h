@@ -7,6 +7,9 @@ struct FakeHttpState {
  std::string body;
  size_t offset=0;
  bool stuck=false;
+ std::string lastUrl;
+ std::string contentType="text/html";
+ std::string transferEncoding;
  void reset(int st,int declared,const std::string &data,bool keep=false){
   status=st;size=declared;body=data;offset=0;stuck=keep;
  }

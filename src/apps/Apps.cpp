@@ -1435,6 +1435,11 @@ ScreenId BrowserApp::handle(AppContext &ctx,const KeyEvent &e){
             ctx.pendingPackagePath=saved;
             return ScreenId::AppInstaller;
           }
+          if(lower.endsWith(".vqeaf")) {
+            // Downloaded themes require deliberate Apply, not auto-execution.
+            ctx.pendingThemePath=saved;
+            return ScreenId::Themes;
+          }
           ctx.ui.message("Download complete",saved,"Saved to microSD");
         }
         else ctx.ui.message("Download failed",err,ctx.browser.linkAt(selectedLink).url);
@@ -1655,7 +1660,7 @@ void SettingsApp::draw(AppContext &ctx) {
     else if (i == 3) value = s.hour12 ? "12-hour" : "24-hour";
     else if (i == 4) value = s.wifiAuto ? "On" : "Off";
     else if (i == 5) value = lockTimeoutText(s.lockTimeoutSec);
-    else value = "VQEAF OS v2.1.0";
+    else value = "VQEAF OS v2.4.2";
     ctx.ui.listItem(row, ics[i], labels[i], value, i == index);
   }
   ctx.ui.scrollbar(SETTINGS_COUNT, SymbianUI::LIST_VISIBLE, offset);
@@ -1713,7 +1718,7 @@ ScreenId SettingsApp::handle(AppContext &ctx, const KeyEvent &e) {
         else if (item == 3) value = s.hour12 ? "12-hour" : "24-hour";
         else if (item == 4) value = s.wifiAuto ? "On" : "Off";
         else if (item == 5) value = lockTimeoutText(s.lockTimeoutSec);
-        else value = "VQEAF OS v2.1.0";
+        else value = "VQEAF OS v2.4.2";
         ctx.ui.listItem(item - offset, ics[item], labels[item], value, selected);
       };
       paintRow(oldIndex, false);
@@ -1749,7 +1754,16 @@ void ThemesApp::enter(AppContext &ctx, ScreenId from) {
   if (ctx.pendingThemePath.length()) {
     int found = ctx.themes.find(ctx.pendingThemePath);
     if (found >= 0) index = BUILTIN_COUNT + found;
-    else feedback = "Theme not found. Rescan SD";
+    else {
+      // Invalid downloads are intentionally not listed in the theme catalog;
+      // show the real parser error instead of the misleading "Rescan SD".
+      ThemeColors checkColors; LauncherStyle checkSkin;
+      String checkName, themeError;
+      if (!ctx.themes.load(ctx.storage,ctx.pendingThemePath,checkColors,
+                           checkName,themeError,&checkSkin)) feedback=themeError;
+      else feedback="Theme catalog full; move to /System/Themes";
+      ctx.notifications.push("Theme rejected",feedback);
+    }
     ctx.pendingThemePath = "";
   } else if (ctx.settings.data().theme == ThemeId::External) {
     int found = ctx.themes.find(ctx.settings.selectedThemePath());
@@ -1917,36 +1931,46 @@ static constexpr int INSTALLER_OPT_COUNT = 7;
 
 void AppInstallerApp::reload(AppContext &ctx) {
   count=0;index=0;offset=0;details=false;confirm=false;feedback="";selectedPath="";previewIconReady=false;willUpdate=false;installAllowed=false;confirmData=false;previousVersion="";
-  if (!ctx.storage.mounted()) return;
+  if (!ctx.storage.mounted()) {feedback="microSD not mounted";return;}
+  if (!ctx.storage.ensureSystemLayout()) {
+    feedback="SD folders unavailable or read-only";
+  }
   ctx.installer.refresh();
   if (installedTab) { count=ctx.installer.count();return; }
-  // Stream directory entries directly into our 12-entry pool: no 40-item
-  // temporary array on the Arduino loop task stack.
-  File folder=ctx.storage.fs().open(StoragePaths::APPS_INBOX,FILE_READ);
-  if(!folder||!folder.isDirectory())return;
-  File item=folder.openNextFile();
-  while(item&&count<MAX_PACKAGES){
-    String full=item.name();int pos=full.lastIndexOf('/');
-    String name=pos<0?full:full.substring(pos+1);
-    String lower=name;lower.toLowerCase();
-    if(!item.isDirectory()&&lower.endsWith(".qeapp")) {
-      const String filePath=String(StoragePaths::APPS_INBOX)+"/"+name;
-      inbox[count]=FsEntry(name,filePath,false,item.size());
-      Qeapp::Meta meta;String readError;
-      InboxLabel &label=inboxLabel[count];
-      label.manifestOk=ctx.installer.inspect(filePath,meta,readError);
-      label.name[0]=label.version[0]=label.type[0]=0;
-      if(label.manifestOk){
-        snprintf(label.name,sizeof label.name,"%s",meta.name);
-        snprintf(label.version,sizeof label.version,"%s",meta.version);
-        snprintf(label.type,sizeof label.type,"%s",meta.type);
+  // Users may copy .qeapp to Downloads or the card root. Show all three
+  // known import locations without recursive scanning or dynamic arrays.
+  const char *sources[]={StoragePaths::APPS_INBOX,StoragePaths::DOWNLOADS,"/"};
+  for (const char *source : sources) {
+    if (count>=MAX_PACKAGES) break;
+    File folder=ctx.storage.fs().open(source,FILE_READ);
+    if (!folder || !folder.isDirectory()) {if(folder)folder.close();continue;}
+    File item=folder.openNextFile();
+    while(item && count<MAX_PACKAGES) {
+      String full=item.name();int pos=full.lastIndexOf('/');
+      String name=pos<0?full:full.substring(pos+1);
+      String lower=name;lower.toLowerCase();
+      if(!item.isDirectory()&&lower.endsWith(".qeapp")&&name.length()<64){
+        String filePath=String(source);
+        if(!filePath.endsWith("/"))filePath+="/";
+        filePath+=name;
+        inbox[count]=FsEntry(name,filePath,false,item.size());
+        Qeapp::Meta meta;String readError;
+        InboxLabel &label=inboxLabel[count];
+        label.manifestOk=ctx.installer.inspect(filePath,meta,readError);
+        label.name[0]=label.version[0]=label.type[0]=0;
+        if(label.manifestOk){
+          snprintf(label.name,sizeof label.name,"%s",meta.name);
+          snprintf(label.version,sizeof label.version,"%s",meta.version);
+          snprintf(label.type,sizeof label.type,"%s",meta.type);
+        }
+        ++count;
       }
-      ++count;
+      item.close();item=folder.openNextFile();
     }
-    item.close();item=folder.openNextFile();
+    if(item)item.close();
+    folder.close();
   }
-  if(item)item.close();
-  folder.close();
+  if (count==0 && feedback.length()==0) feedback="Copy signed .qeapp to Apps/Inbox";
 }
 
 void AppInstallerApp::enter(AppContext &ctx,ScreenId from){
@@ -2037,7 +2061,7 @@ void AppInstallerApp::draw(AppContext &ctx){
    ctx.ui.softkeys("Options",installedTab?"Open":(installAllowed?(willUpdate?"Update":"Install"):"Disabled"),"Back");
    drawPopup(ctx,popup,INSTALLER_OPTS,INSTALLER_OPT_COUNT);return;
  }
- if(!count){ctx.ui.message(tab,installedTab?"No installed applications":"No .qeapp files in inbox",installedTab?"Switch to Inbox with Options":"Download via Qeafbrowser");}
+ if(!count){ctx.ui.message(tab,installedTab?"No installed applications":"No signed .qeapp on microSD",installedTab?"Switch to Inbox with Options":"Download via Qeafbrowser");}
  else for(int row=0;row<SymbianUI::LIST_VISIBLE;row++)paintRow(ctx,offset+row,offset+row==index);
  ctx.ui.scrollbar(count,SymbianUI::LIST_VISIBLE,offset);
  if(feedback.length()){

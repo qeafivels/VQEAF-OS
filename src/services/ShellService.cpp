@@ -6,6 +6,13 @@
 #include <WiFiClientSecure.h>
 #include "TrustedTls.h"
 #include "BoardDiagnostics.h"
+#if defined(VQEAF_SNAKE_DEMO_KEY)
+#include "SnakeDemoTrustKey.h"
+#elif defined(QEAPP_TRUST_KEY_HEADER)
+#include QEAPP_TRUST_KEY_HEADER
+#else
+#include "QeappTrustKey.h"
+#endif
 #include <HTTPClient.h>
 #include <SD_MMC.h>
 #include <time.h>
@@ -594,7 +601,7 @@ void ShellService::commandCache(const String &actionRaw) {
 
 void ShellService::commandHelp() {
   push("SYSTEM: help clear uname uptime free");
-  push("layout cache df mount sd sddiag top");
+  push("layout cache df mount sd sddiag corediag top");
   push("FILES: ls cd pwd cat stat mkdir rm");
   push("rmdir cp mv touch write append hexdump");
   push("NET: wifi ifconfig ip nslookup ping");
@@ -617,7 +624,7 @@ void ShellService::execute(const String &input, NotificationService &notificatio
   if (cmd == "help" || cmd == "?") commandHelp();
   else if (cmd == "clear" || cmd == "cls") clear();
   else if (cmd == "uname") push("VQEAF-OS ESP32-S3 Xtensa LX7");
-  else if (cmd == "version") push("VQEAF OS v2.4.0");
+  else if (cmd == "version") push("VQEAF OS v2.4.2");
   else if (cmd == "uptime") push(systemService ? systemService->uptimeText() : String(millis() / 1000UL) + "s");
   else if (cmd == "free") {
     push(String("heap free: ") + String((unsigned long)ESP.getFreeHeap()));
@@ -633,6 +640,33 @@ void ShellService::execute(const String &input, NotificationService &notificatio
       push(String("I/O failures: ") + storageService->ioErrors());
       push("Probe 8s / retry 5-15s when idle");
     }
+  }
+  else if (cmd == "corediag") {
+    // Read-only field diagnosis: no key material, network credentials or
+    // user files are printed. Distinguish SD, package-key and TLS failures.
+    push(String("microSD: ") + (storageService && storageService->mounted() ? "OK" : "NOT MOUNTED"));
+    if (storageService && storageService->mounted()) {
+      const char *dirs[]={StoragePaths::THEMES,StoragePaths::APPS_INBOX,
+                           StoragePaths::APPS_INSTALLED,StoragePaths::CACHE_WEB};
+      for (const char *dir : dirs) {
+        File entry=storageService->fs().open(dir,FILE_READ);
+        const bool ok=entry && entry.isDirectory();
+        if(entry)entry.close();
+        push(String(ok?"OK ":"MISSING ")+dir);
+      }
+      const char *appExt[]={".qeapp"}, *skinExt[]={".vqeaf"};
+      FsEntry found[1];
+      const int nApps=storageService->scanMedia(StoragePaths::APPS_INBOX,appExt,1,found,1,0);
+      const int nThemes=storageService->scanMedia(StoragePaths::THEMES,skinExt,1,found,1,0);
+      push(String("Inbox QEAPP: ")+(nApps?"found":"none"));
+      push(String("Themes: ")+(nThemes?"found":"none"));
+    }
+    char key[16];snprintf(key,sizeof key,"0x%08lX",(unsigned long)QEAPP_TRUST_KEY_ID);
+    push(String("QEAPP trust key: ")+key);
+    push(String("WiFi: ")+(WiFi.status()==WL_CONNECTED?"connected":"offline"));
+    push(String("HTTPS clock: ")+(TrustedTls::timeValidAt(time(nullptr))?"READY":"WAIT NTP"));
+    push("Signed apps: inspect via App Manager");
+    push("TLS: tlsdiag valid after time sync");
   }
   else if (cmd == "sddiag") {
     if (!storageService) push("sddiag: storage service unavailable");

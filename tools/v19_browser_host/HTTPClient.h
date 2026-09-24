@@ -9,13 +9,13 @@ class HTTPClient {
 public:
  void setConnectTimeout(int){} void setTimeout(int){} void setFollowRedirects(int){}
  void setUserAgent(const char*){} void collectHeaders(const char*[],size_t){}
- bool begin(WiFiClient&,const char*){return true;}
- bool begin(WiFiClientSecure&,const char*){return true;}
+ bool begin(WiFiClient&,const char*url){gFakeHttp.lastUrl=url;return true;}
+ bool begin(WiFiClientSecure&,const char*url){gFakeHttp.lastUrl=url;return true;}
  void addHeader(const char*,const char*){}
  int GET(){return gFakeHttp.status;}
  int getSize()const{return gFakeHttp.size;}
  String getLocation()const{return String();}
- String header(const char*)const{return String("text/html");}
+ String header(const char* key)const {return String(std::strcmp(key,"Transfer-Encoding")==0?gFakeHttp.transferEncoding:gFakeHttp.contentType);}
  WiFiClient *getStreamPtr(){return &stream;}
  bool connected()const{return stream.connected();}
  void end(){}

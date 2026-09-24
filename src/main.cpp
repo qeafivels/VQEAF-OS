@@ -24,6 +24,7 @@
 #include "services/AppInstallerService.h"
 #include "services/QeappDataService.h"
 #include "apps/Apps.h"
+#include "apps/PixelSnakeApp.h"
 
 static TFT_eSPI tft;
 static VqeafUI ui(tft); // compatibility adapter over the existing UI implementation
@@ -66,6 +67,7 @@ static QuickPanelApp quickPanelApp;
 static TaskSwitcherApp taskSwitcherApp;
 static NotificationCenterApp notificationApp;
 static NotesApp notesApp;
+static PixelSnakeApp pixelSnakeApp;
 
 static ScreenId screen = ScreenId::Splash;
 static ScreenId detailReturn = ScreenId::Applications;
@@ -187,7 +189,12 @@ static void enterScreen(ScreenId s, bool animate = true, bool resume = false) {
     } else {
       packageOpeningName = meta.name;
       appCtx.pendingPackageLaunch = true;
-      if (!strcmp(meta.type, "web")) {
+      if (!strcmp(meta.id, "snake_pixel") && !strcmp(meta.type, "text")) {
+        if (pixelSnakeApp.enter(appCtx)) s = ScreenId::Snake;
+        else { notifications.push("Pixel Snake", "Invalid signed game settings"); s = ScreenId::Applications; }
+        // Browser and Text Viewer normally consume this flag. Snake does not.
+        appCtx.pendingPackageLaunch = false;
+      } else if (!strcmp(meta.type, "web")) {
         appCtx.pendingBrowserUrl = meta.entry;
         s = ScreenId::Browser;
       } else {
@@ -247,6 +254,8 @@ static void enterScreen(ScreenId s, bool animate = true, bool resume = false) {
       if (!resume) textViewerApp.enter(appCtx); textViewerApp.draw(appCtx); break;
     case ScreenId::Browser:
       if (!resume) browserApp.enter(appCtx); browserApp.draw(appCtx); break;
+    case ScreenId::Snake:
+      pixelSnakeApp.draw(appCtx); break;
     case ScreenId::Shell:
       if (!resume) shellApp.enter(appCtx); shellApp.draw(appCtx); break;
     case ScreenId::Settings:
@@ -526,7 +535,7 @@ void loop() {
     if (screen == ScreenId::Explorer) explorer.draw(appCtx);
     if (screen == ScreenId::Files || screen == ScreenId::Gallery ||
         screen == ScreenId::Themes || screen == ScreenId::TextViewer ||
-        screen == ScreenId::AppInstaller) enterScreen(ScreenId::Idle, false);
+        screen == ScreenId::AppInstaller || screen == ScreenId::Snake) enterScreen(ScreenId::Idle, false);
   } else if (cardEvent == StorageService::CardEvent::Mounted) {
     Serial.printf("[S3DIAG][SD] event=MOUNTED errors=%u uptime_ms=%lu\n", storage.ioErrors(), (unsigned long)millis());
     notifications.push("microSD mounted", "Filesystem ready again");
@@ -540,6 +549,7 @@ void loop() {
     if (screen == ScreenId::Explorer) explorer.draw(appCtx);
   }
   stopwatchApp.tick(appCtx, screen == ScreenId::Stopwatch);
+  if (screen == ScreenId::Snake) pixelSnakeApp.tick(appCtx);
   galleryApp.tick(appCtx, screen == ScreenId::Gallery);
   wifiApp.tick(appCtx, screen == ScreenId::WiFi);
   systemService.update(notifications);
@@ -689,6 +699,8 @@ void loop() {
       next = textViewerApp.handle(appCtx,e); break;
     case ScreenId::Browser:
       next = browserApp.handle(appCtx,e); break;
+    case ScreenId::Snake:
+      next = pixelSnakeApp.handle(appCtx,e); break;
     case ScreenId::Shell:
       next = shellApp.handle(appCtx,e); break;
     case ScreenId::Settings:

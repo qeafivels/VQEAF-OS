@@ -108,6 +108,7 @@ bool SystemService::isTaskScreen(ScreenId s) {
     case ScreenId::About:
     case ScreenId::Calculator:
     case ScreenId::Stopwatch:
+    case ScreenId::Snake:
       return true;
     default:
       return false;
@@ -198,6 +199,7 @@ const char *SystemService::screenName(ScreenId s) {
     case ScreenId::About: return "About";
     case ScreenId::Calculator: return "Calculator";
     case ScreenId::Stopwatch: return "Stopwatch";
+    case ScreenId::Snake: return "Pixel Snake";
     default: return "Menu";
   }
 }
@@ -225,6 +227,7 @@ const char *SystemService::screenIcon(ScreenId s) {
     case ScreenId::About: return "i";
     case ScreenId::Calculator: return "Calc";
     case ScreenId::Stopwatch: return "Clk";
+    case ScreenId::Snake: return "Game";
     default: return "App";
   }
 }

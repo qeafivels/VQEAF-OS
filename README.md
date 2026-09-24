@@ -148,3 +148,13 @@ py -3 tools\measure_firmware_icon_impact.py
 The last command **builds two full firmware variants**, recording actual
 `firmware.bin` deltas. Without PlatformIO it reports UNAVAILABLE. The `vqeaf_os`
 production environment remains optimized and contains no self-test payload.
+
+
+## Pixel Snake signed QEAPP template (opt-in firmware extension)
+
+A bounded native Pixel Snake game handler is included in v2.4.1. The demo
+`games/pixel_snake/dist/snake_pixel_demo.qeapp` requires the **separate**
+`vqeaf_snake_demo` firmware environment. Existing `vqeaf_os` publisher pin is
+untouched. The signed package contains only the game configuration and icon;
+**no general runtime for game scripts is implied.** See
+`games/pixel_snake/README_VN.md`.

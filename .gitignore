@@ -11,10 +11,10 @@ __pycache__/
 # Build output created locally by offline tool
 build_reports/offline/
 
-# Generated diagnostics and previews
+# Generated test reports
 build_reports/
-preview/icon_host/
-preview/pixel_art/host_ppm/
-# Keep only documented source fixtures; no private signing keys
-*.secret
+# Signing material and local environment
+.env
+.env.*
+!.env.example
 **/private*/

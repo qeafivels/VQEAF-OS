@@ -30,7 +30,8 @@ enum class ScreenId : uint8_t {
   SystemInfo,
   About,
   Calculator,
-  Stopwatch
+  Stopwatch,
+  Snake // optional trusted built-in game, activated by signed snake_pixel text package
 };
 
 enum class Key : uint8_t {

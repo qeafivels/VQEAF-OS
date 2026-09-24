@@ -1,6 +1,8 @@
 #include "QeappSignature.h"
 #include <string.h>
-#ifdef QEAPP_TRUST_KEY_HEADER
+#if defined(VQEAF_SNAKE_DEMO_KEY)
+#include "SnakeDemoTrustKey.h"
+#elif defined(QEAPP_TRUST_KEY_HEADER)
 #include QEAPP_TRUST_KEY_HEADER
 #else
 #include "QeappTrustKey.h"

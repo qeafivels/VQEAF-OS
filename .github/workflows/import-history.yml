@@ -1,0 +1,53 @@
+name: Import verified VQEAF OS history
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'import/READY'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vqeaf-os-source-import
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reassemble and verify Git bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, hashlib, json, pathlib
+          root = pathlib.Path("import")
+          m = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+          parts = sorted(root.glob("part-*.b64"))
+          assert len(parts) == m["part_count"], f"Expected {m['part_count']} parts, got {len(parts)}"
+          raw = base64.b64decode("".join(p.read_text(encoding="ascii").strip() for p in parts), validate=True)
+          assert len(raw) == m["size_bytes"], "Bundle length mismatch"
+          assert hashlib.sha256(raw).hexdigest() == m["sha256"], "Bundle checksum mismatch"
+          pathlib.Path("/tmp/vqeaf-original.bundle").write_bytes(raw)
+          print(f"Verified original VQEAF Git history: {len(raw)} bytes, SHA256 {m['sha256']}")
+          PY
+          git bundle verify /tmp/vqeaf-original.bundle
+      - name: Import exact prepared commits to main
+        shell: bash
+        env:
+          BOOTSTRAP_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          EXPECTED="$(python3 -c 'import json;print(json.load(open("import/manifest.json"))["head_sha"])')"
+          git fetch /tmp/vqeaf-original.bundle refs/heads/main:refs/remotes/vqeaf-import/main
+          ACTUAL="$(git rev-parse refs/remotes/vqeaf-import/main)"
+          test "$ACTUAL" = "$EXPECTED" || { echo "Imported HEAD mismatch"; exit 1; }
+          echo "Importing original prepared history at $ACTUAL"
+          git push origin refs/remotes/vqeaf-import/main:refs/heads/main "--force-with-lease=refs/heads/main:$BOOTSTRAP_SHA"

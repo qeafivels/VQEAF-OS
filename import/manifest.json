@@ -1,0 +1,9 @@
+{
+  "bundle_name": "VQEAF-OS-v2.4.1.bundle",
+  "head_sha": "654f51363eeb84212e9e0f726bac292cdfbde18d",
+  "size_bytes": 2037997,
+  "sha256": "fc6ecab908c733efa31041e6c7b467ed843b09f49c16e92f4f287603a7dfdd6f",
+  "part_count": 34,
+  "bytes_base64": 2717332,
+  "note": "Original two-commit VQEAF OS v2.4.1 history; verified via git bundle."
+}

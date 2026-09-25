@@ -1389,15 +1389,15 @@ ScreenId TextViewerApp::handle(AppContext &ctx,const KeyEvent &e) {
 }
 
 // ---------------- Qeafbrowser ----------------
-static const char *const browserOptions[] = {"Enter address", "Home", "Reload", "Back", "Download link", "Downloads", "Page info"};
+static const char *const browserOptions[] = {"Enter address", "Home", "Reload", "Back", "Download link", "Downloads", "Page info", "Speed Dial", "History", "Bookmarks", "Bookmark page", "Help"};
 static constexpr int BROWSER_OPTIONS=sizeof(browserOptions)/sizeof(browserOptions[0]);
 static constexpr int BROWSER_VISIBLE=13;
 
 void BrowserApp::loadHome(AppContext &ctx) {
   if (ctx.system.safeMode()) return;
   ctx.ui.chrome("Qeafbrowser",statusWifi(),false,false,ctx.settings.data().hour12);
-  ctx.ui.message("Qeafbrowser","Loading...","https://qeafivels.com/"); ctx.ui.softkeys("","","Cancel");
-  ctx.browser.load("https://qeafivels.com/");
+  ctx.ui.message("Qeafbrowser","Opening...","Speed Dial"); ctx.ui.softkeys("","","Cancel");
+  ctx.browser.load("mtt:start");
   offset=0; selectedLink=ctx.browser.linkCount()?0:-1;
 }
 
@@ -1413,7 +1413,7 @@ void BrowserApp::enter(AppContext &ctx) {
     if(ctx.browser.linkCount())selectedLink=0;
     return;
   }
-  if(ctx.browser.lineCount()==0 && statusWifi()) loadHome(ctx);
+  if(ctx.browser.lineCount()==0) loadHome(ctx);
   if(ctx.browser.linkCount()) selectedLink=0;
 }
 
@@ -1463,7 +1463,18 @@ ScreenId BrowserApp::handle(AppContext &ctx,const KeyEvent &e){
         }
         else ctx.ui.message("Download failed",err,ctx.browser.linkAt(selectedLink).url);
         ctx.ui.softkeys("","","Back");return ScreenId::Browser;
-      }if(choice==5){ctx.pendingFolderPath=StoragePaths::DOWNLOADS;return ScreenId::Files;}if(choice==6){ctx.ui.message("Page info",ctx.browser.title(),ctx.browser.url(),String(ctx.browser.pageFromCache()?"CACHE  ":"HTTP ")+String(ctx.browser.status())+"  "+String(ctx.browser.lineCount())+" lines");ctx.ui.softkeys("","","Back");return ScreenId::Browser;}}popupNav(popup,e,BROWSER_OPTIONS);draw(ctx);return ScreenId::Browser;}
+      }if(choice==5){ctx.pendingFolderPath=StoragePaths::DOWNLOADS;return ScreenId::Files;}if(choice==6){ctx.ui.message("Page info",ctx.browser.title(),ctx.browser.url(),String(ctx.browser.pageFromCache()?"CACHE  ":"HTTP ")+String(ctx.browser.status())+"  "+String(ctx.browser.lineCount())+" lines");ctx.ui.softkeys("","","Back");return ScreenId::Browser;}
+        if(choice>=7 && choice<=9 || choice==11){
+          const char *dest=choice==7?"mtt:start":choice==8?"mtt:history":choice==9?"mtt:bookmark":"mtt:help";
+          ctx.browser.load(dest);offset=0;selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);
+          return ScreenId::Browser;
+        }
+        if(choice==10){
+          bool saved=ctx.browser.bookmarkCurrent();
+          ctx.notifications.push("Qeafbrowser",saved?"Bookmark saved":"Cannot save bookmark");
+          draw(ctx);return ScreenId::Browser;
+        }
+      }popupNav(popup,e,BROWSER_OPTIONS);draw(ctx);return ScreenId::Browser;}
   if(e.key==Key::A||e.key==Key::B)return launchedFromPackage?ScreenId::Applications:ScreenId::Launcher;
   if(e.key==Key::Option){popup.show();drawPopup(ctx,popup,browserOptions,BROWSER_OPTIONS);return ScreenId::Browser;}
   if(e.key==Key::Left){moveLink(ctx,-1);return ScreenId::Browser;}if(e.key==Key::Right){moveLink(ctx,1);return ScreenId::Browser;}

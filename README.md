@@ -34,7 +34,9 @@ Giao diện Home/Menu, icon pixel RGB565/RLE, các theme và logic renderer thu�
 
 **CẢNH BÁO:** ảnh `.img` là **bản cài sạch phá hủy dữ liệu**: sẽ ghi đè NVS, OTA slot, LittleFS và coredump. Chỉ nạp từ offset `0x0` lên board ESP32-S3 N16R8 **sau khi sao lưu toàn bộ Flash 16 MiB**. Không dùng như một gói `.qeapp`, ảnh thẻ SD, OTA hay cập nhật thông thường. Nếu đang sử dụng OS và muốn giữ dữ liệu, hãy build/upload profile `vqeaf_os` qua PlatformIO, không ghi toàn bộ `.img`. Chưa có kiểm thử trên phần cứng thật.
 
-**[Hướng dẫn cài, kiểm tra SHA-256 và tự đóng gói IMG](docs/FACTORY_IMG_INSTALL_V251_VN.md)** · Script: `tools/build_factory_img.py`; bộ test an toàn: `tools/test_factory_img.py`.
+**[Hướng dẫn cài, kiểm tra SHA-256 và tự đóng gói IMG](docs/FACTORY_IMG_INSTALL_V251_VN.md)**
+
+**ESP32-S3 Flash Download Tool v3.9.11:** `SPI SPEED` và `SPI MODE` bị khóa theo thiết kế từ phiên bản 3.9.10; không cần và không thể ép chọn QIO/80 MHz bằng hai nút xám này. Giữ `DoNotChgBin` để bảo toàn header của ảnh đã kiểm tra, chọn duy nhất `factory.img` tại `0x0`, xác nhận COM và sao lưu Flash trước khi bấm START. Xem [hướng dẫn chi tiết và xử lý màn hình đen](docs/FACTORY_IMG_INSTALL_V251_VN.md#7-flash-download-tool-v3911-spi-speed--spi-mode-bị-khóa). · Script: `tools/build_factory_img.py`; bộ test an toàn: `tools/test_factory_img.py`.
 
 ## Build trên máy phát triển
 

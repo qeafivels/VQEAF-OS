@@ -6,6 +6,7 @@ on:
       - 'src/**'
       - 'tools/test_legacy_merge.py'
       - 'tools/legacy_host/**'
+      - 'tools/test_vqeaf_full_soak.py'
       - 'themes/**'
       - 'sd/System/Themes/**'
       - 'docs/LEGACY_E524546_MERGE_VN.md'
@@ -28,6 +29,8 @@ jobs:
         run: python tools/test_legacy_merge.py
       - name: Full VQEAF-OS compiled host regression
         run: python tools/run_full_system_review.py
+      - name: 20k state transitions plus 240 actual C++ framebuffer renders and 12 screenshots
+        run: python tools/test_vqeaf_full_soak.py
       - name: Production ESP32-S3 N16R8 firmware build
         run: pio run -e vqeaf_os
       - name: Export exact stock firmware before compiling beta
@@ -51,6 +54,9 @@ jobs:
           name: VQEAF-E524546-legacy-integration-host-and-build
           path: |
             preview/vqeaf_full_system_host_capture.png
+            preview/vqeaf_full_system_12screens_stress.png
+            preview/sketch_*.png
+            build_reports/system_stress/
             preview/vqeaf_large_statusbar_comparison.png
             build_reports/system_full/
             ci_output/VQEAF_OS_legacy_features_stock.bin

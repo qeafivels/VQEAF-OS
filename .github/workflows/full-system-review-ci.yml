@@ -9,6 +9,7 @@ on:
       - 'tools/test_*.py'
       - 'tools/verify_*.py'
       - 'tools/vqeaf_host/**'
+      - 'tools/host_stubs/**'
       - '.github/workflows/full-system-review-ci.yml'
 permissions:
   contents: read
@@ -38,6 +39,11 @@ jobs:
             preview/browser_keyboard_focus.png
             preview/wifi_keyboard_masked.png
             preview/system_notifications.png
+            preview/vqeaf_large_statusbar_comparison.png
+            preview/statusbar_large_green.png
+            preview/statusbar_large_night.png
+            preview/statusbar_low_green.png
+            preview/statusbar_low_night.png
             preview/installer_revisit_open.png
             preview/installed_apps_open_menu.png
             build_reports/system_full/

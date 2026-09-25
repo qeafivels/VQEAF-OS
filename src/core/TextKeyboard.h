@@ -3,6 +3,8 @@
 #include "SymbianUI.h"
 #include "Types.h"
 
+// One OS-wide virtual keyboard, modeled on Qeafbrowser's four-row keypad.
+// No heap allocations for layout; caller-owned String stays bounded.
 class TextKeyboard {
 public:
   void open(const String &caption, const String &initial = "", bool password = false);
@@ -13,16 +15,20 @@ public:
   bool cancelled() const { return cancel; }
   String value() const { return text; }
 private:
-  bool shown = false, done = false, cancel = false, masked = false, upper = false, firstDraw = false;
-  String caption, text;
-  int cursor = 0;
-  Key lastNumeric = Key::None;
-  int numericTap = 0;
-  uint32_t numericAt = 0;
+  bool shown=false,done=false,cancel=false,masked=false,upper=false,symbols=false;
+  String caption,text;
+  int row=1,col=0;
+  Key lastNumeric=Key::None;
+  int numericTap=0;
+  uint32_t numericAt=0;
+  static constexpr int MAX_TEXT=159;
+  static constexpr int LETTER_ROWS=4;
+  static constexpr int SPECIAL_ROW=4;
+  static constexpr int SPECIAL_COUNT=5;
+  const char *rowChars(int index) const;
+  int colsFor(int index) const;
   bool typeDigit(Key digit);
-  static constexpr int COLS = 6;
-  static constexpr int COUNT = 52;
-  static constexpr int MAX_TEXT = 159;
-  const char *layout = "abcdefghijklmnopqrstuvwxyz0123456789-_.!@#$%&*()+?/:";
-  void moveVertical(int direction);
+  bool insert(const char *s);
+  void activate();
+  void moveRow(int direction);
 };

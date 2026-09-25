@@ -1389,15 +1389,15 @@ ScreenId TextViewerApp::handle(AppContext &ctx,const KeyEvent &e) {
 }
 
 // ---------------- Qeafbrowser ----------------
-static const char *const browserOptions[] = {"Enter address", "Home", "Reload", "Back", "Download link", "Downloads", "Page info"};
+static const char *const browserOptions[] = {"Enter address", "Home", "Reload", "Back", "Download link", "Downloads", "Page info", "Speed Dial", "History", "Bookmarks", "Bookmark page", "Help"};
 static constexpr int BROWSER_OPTIONS=sizeof(browserOptions)/sizeof(browserOptions[0]);
 static constexpr int BROWSER_VISIBLE=13;
 
 void BrowserApp::loadHome(AppContext &ctx) {
   if (ctx.system.safeMode()) return;
   ctx.ui.chrome("Qeafbrowser",statusWifi(),false,false,ctx.settings.data().hour12);
-  ctx.ui.message("Qeafbrowser","Loading...","https://qeafivels.com/"); ctx.ui.softkeys("","","Cancel");
-  ctx.browser.load("https://qeafivels.com/");
+  ctx.ui.message("Qeafbrowser","Opening...","Speed Dial"); ctx.ui.softkeys("","","Cancel");
+  ctx.browser.load("mtt:start");
   offset=0; selectedLink=ctx.browser.linkCount()?0:-1;
 }
 
@@ -1413,17 +1413,33 @@ void BrowserApp::enter(AppContext &ctx) {
     if(ctx.browser.linkCount())selectedLink=0;
     return;
   }
-  if(ctx.browser.lineCount()==0 && statusWifi()) loadHome(ctx);
+  if(ctx.browser.lineCount()==0) loadHome(ctx);
   if(ctx.browser.linkCount()) selectedLink=0;
 }
 
 void BrowserApp::redrawBody(AppContext &ctx) {
-  ctx.ui.clearContent();
+  // Do not blank the full viewport on every D-pad scroll. Repaint each row
+  // completely, then the scrollbar; avoid exposing a full black/empty frame.
   TFT_eSPI &d=ctx.ui.display(); ThemeColors c=ctx.ui.c();
+  d.fillRect(0,29,240,35,c.bg);
   d.fillRect(5,36,230,24,c.panel); d.drawRect(5,36,230,24,c.dim);
   d.setTextFont(1); d.setTextColor(c.dim,c.panel); String u=ctx.browser.url(); if(u.length()>38)u=u.substring(0,37)+"~"; d.setCursor(9,44); d.print(u); if(ctx.browser.pageFromCache()){d.setTextColor(c.accent,c.panel);d.setCursor(201,44);d.print("C");}
   int y=66;
-  for(int row=0;row<BROWSER_VISIBLE;++row){int i=offset+row;if(i>=ctx.browser.lineCount())break;const BrowserLine &ln=ctx.browser.lineAt(i);bool sel=ln.link>=0&&ln.link==selectedLink;uint16_t bg=sel?c.selected:c.bg;d.fillRect(4,y-2,232,15,bg);d.setTextColor(ln.link>=0?0x05FF:c.text,bg);d.setCursor(7,y);d.print(ln.text);if(sel)d.drawRect(4,y-2,232,15,c.border);y+=16;}
+  for(int row=0;row<BROWSER_VISIBLE;++row){
+    const int i=offset+row;
+    const bool populated=i<ctx.browser.lineCount();
+    const BrowserLine *ln=populated?&ctx.browser.lineAt(i):nullptr;
+    const bool sel=ln && ln->link>=0 && ln->link==selectedLink;
+    const uint16_t bg=sel?c.selected:c.bg;
+    d.fillRect(0,y-2,240,16,bg);
+    if(ln){
+      d.setTextColor(ln->link>=0?0x05FF:c.text,bg);
+      d.setCursor(7,y);d.print(ln->text);
+      if(sel)d.drawRect(4,y-2,232,15,c.border);
+    }
+    y+=16;
+  }
+  d.fillRect(0,272,240,26,c.bg);
   ctx.ui.scrollbar(ctx.browser.lineCount(),BROWSER_VISIBLE,offset,64,278);
   ctx.ui.softkeys("Options",selectedLink>=0?"Open":"","Back");
 }
@@ -1444,7 +1460,7 @@ ScreenId BrowserApp::handle(AppContext &ctx,const KeyEvent &e){
   if(ctx.keyboard.active()){if(ctx.keyboard.handle(e)){if(ctx.keyboard.accepted()){String u=ctx.keyboard.value();ctx.ui.message("Qeafbrowser","Loading...",u);ctx.browser.load(u);offset=0;selectedLink=ctx.browser.linkCount()?0:-1;}draw(ctx);}return ScreenId::Browser;}
   if(!e.pressed||e.longPress)return ScreenId::Browser;
   if(ctx.system.safeMode()){if(e.key==Key::A||e.key==Key::B)return launchedFromPackage?ScreenId::Applications:ScreenId::Launcher;return ScreenId::Browser;}
-  if(popup.open){if(e.key==Key::Start||e.key==Key::Select){int choice=popup.index;popup.close();if(choice==0){ctx.keyboard.open("Web address",ctx.browser.url(),false);draw(ctx);return ScreenId::Browser;}if(choice==1){loadHome(ctx);draw(ctx);return ScreenId::Browser;}if(choice==2){ctx.ui.message("Qeafbrowser","Reloading...",ctx.browser.url());ctx.browser.reload();offset=0;selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);return ScreenId::Browser;}if(choice==3){ctx.browser.goBack();offset=0;selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);return ScreenId::Browser;}if(choice==4){
+  if(popup.open){if(e.key==Key::Start||e.key==Key::Select){int choice=popup.index;popup.close();if(choice==0){String initial=ctx.browser.url();if(initial.startsWith("mtt:"))initial="";ctx.keyboard.open("Web address",initial,false);draw(ctx);return ScreenId::Browser;}if(choice==1){loadHome(ctx);draw(ctx);return ScreenId::Browser;}if(choice==2){ctx.ui.message("Qeafbrowser","Reloading...",ctx.browser.url());ctx.browser.reload();offset=0;selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);return ScreenId::Browser;}if(choice==3){ctx.browser.goBack();offset=0;selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);return ScreenId::Browser;}if(choice==4){
         if(selectedLink<0){ctx.ui.message("Download","Select a page link first");ctx.ui.softkeys("","","Back");return ScreenId::Browser;}
         String saved,err;ctx.ui.message("Qeafbrowser","Downloading...",ctx.browser.linkAt(selectedLink).label);
         if(ctx.browser.download(ctx.browser.linkAt(selectedLink).url,saved,err)){
@@ -1463,7 +1479,18 @@ ScreenId BrowserApp::handle(AppContext &ctx,const KeyEvent &e){
         }
         else ctx.ui.message("Download failed",err,ctx.browser.linkAt(selectedLink).url);
         ctx.ui.softkeys("","","Back");return ScreenId::Browser;
-      }if(choice==5){ctx.pendingFolderPath=StoragePaths::DOWNLOADS;return ScreenId::Files;}if(choice==6){ctx.ui.message("Page info",ctx.browser.title(),ctx.browser.url(),String(ctx.browser.pageFromCache()?"CACHE  ":"HTTP ")+String(ctx.browser.status())+"  "+String(ctx.browser.lineCount())+" lines");ctx.ui.softkeys("","","Back");return ScreenId::Browser;}}popupNav(popup,e,BROWSER_OPTIONS);draw(ctx);return ScreenId::Browser;}
+      }if(choice==5){ctx.pendingFolderPath=StoragePaths::DOWNLOADS;return ScreenId::Files;}if(choice==6){ctx.ui.message("Page info",ctx.browser.title(),ctx.browser.url(),String(ctx.browser.pageFromCache()?"CACHE  ":"HTTP ")+String(ctx.browser.status())+"  "+String(ctx.browser.lineCount())+" lines");ctx.ui.softkeys("","","Back");return ScreenId::Browser;}
+        if(choice>=7 && choice<=9 || choice==11){
+          const char *dest=choice==7?"mtt:start":choice==8?"mtt:history":choice==9?"mtt:bookmark":"mtt:help";
+          ctx.browser.load(dest);offset=0;selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);
+          return ScreenId::Browser;
+        }
+        if(choice==10){
+          bool saved=ctx.browser.bookmarkCurrent();
+          ctx.notifications.push("Qeafbrowser",saved?"Bookmark saved":"Cannot save bookmark");
+          draw(ctx);return ScreenId::Browser;
+        }
+      }popupNav(popup,e,BROWSER_OPTIONS);draw(ctx);return ScreenId::Browser;}
   if(e.key==Key::A||e.key==Key::B)return launchedFromPackage?ScreenId::Applications:ScreenId::Launcher;
   if(e.key==Key::Option){popup.show();drawPopup(ctx,popup,browserOptions,BROWSER_OPTIONS);return ScreenId::Browser;}
   if(e.key==Key::Left){moveLink(ctx,-1);return ScreenId::Browser;}if(e.key==Key::Right){moveLink(ctx,1);return ScreenId::Browser;}

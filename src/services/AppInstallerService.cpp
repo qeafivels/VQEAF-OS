@@ -119,6 +119,9 @@ bool AppInstallerService::scanPackage(File &f,Qeapp::Header &h,Qeapp::Meta &m,St
  if(!Qeapp::parseManifest(manifest.get(),h.manifestLen,m,reason)){error=reason;return false;}
  m.hasIcon=(h.iconLen==Qeapp::ICON_BYTES);
  if(!strcmp(m.type,"text")&&!h.payloadLen){error="Text app has no payload";return false;}
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+ if(!strcmp(m.type,"lua")&&(h.payloadLen<1||h.payloadLen>64*1024)){error="Lua source size must be 1..65536";return false;}
+#endif
  if(!strcmp(m.type,"web")&&h.payloadLen){error="Web app must not contain payload";return false;}
  if(!verify)return true;
  const uint32_t sections[2]={h.iconLen,h.payloadLen};const uint8_t *hashes[2]={h.iconHash,h.payloadHash};
@@ -135,7 +138,7 @@ bool AppInstallerService::scanPackage(File &f,Qeapp::Header &h,Qeapp::Meta &m,St
  uint8_t trailer[Qeapp::SIGNATURE_BYTES];
  if(f.read(trailer,sizeof trailer)!=(int)sizeof trailer){error="Missing QEAPP signature";return false;}
  signedBytes.finish(digest);
- if(!Qeapp::verifySignature(digest,trailer,reason)){error=reason;return false;}
+ if(!Qeapp::verifySignature(digest,trailer,reason,m.type)){error=reason;return false;}
  error="";return true;
 }
 
@@ -236,9 +239,12 @@ bool AppInstallerService::verifyDirectory(const String &dir,const String &id,Qea
  }
  if(!Qeapp::parseManifest(manifest.get(),h.manifestLen,meta,reason)||id!=meta.id){error="Installed manifest invalid";return false;}
  if((!strcmp(meta.type,"text")&&!h.payloadLen)||(!strcmp(meta.type,"web")&&h.payloadLen)){error="Installed app type mismatch";return false;}
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+ if(!strcmp(meta.type,"lua")&&(h.payloadLen<1||h.payloadLen>64*1024)){error="Installed Lua source invalid size";return false;}
+#endif
  meta.hasIcon=h.iconLen==Qeapp::ICON_BYTES;
  signedBytes.finish(digest);
- if(!Qeapp::verifySignature(digest,trailer,reason)){error=reason;return false;}
+ if(!Qeapp::verifySignature(digest,trailer,reason,meta.type)){error=reason;return false;}
  error="";return true;
 }
 

@@ -7,10 +7,8 @@ __pycache__/
 *.p12
 *.pfx
 *private*.json
-
 # Build output created locally by offline tool
 build_reports/offline/
-
 # Generated test reports
 build_reports/
 # Signing material and local environment
@@ -18,3 +16,8 @@ build_reports/
 .env.*
 !.env.example
 **/private*/
+# Local beta PUBLIC trust anchor generated from developer-owned private PEM.
+# Never embed a user-specific anchor in the default OS repository/CI artifact.
+src/services/QeappTrustKeyLuaBeta.h
+# Lua 5.4 source is bootstrapped by tools/bootstrap_lua.py with exact SHA256.
+lib/VqeafLua54/src/

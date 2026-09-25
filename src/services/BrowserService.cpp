@@ -46,6 +46,13 @@ bool BrowserService::normalizeUrl(const String &input, char *out, size_t cap) {
   String candidate = input;
   candidate.trim();
   if (!candidate.length()) return false;
+  if (!strncmp(candidate.c_str(), "mtt:", 4)) {
+    const char *p=candidate.c_str();
+    if (strcmp(p,"mtt:start") && strcmp(p,"mtt:history") &&
+        strcmp(p,"mtt:bookmark") && strcmp(p,"mtt:help") &&
+        strcmp(p,"mtt:about")) return false;
+    return copyUrl(out,cap,p);
+  }
   if (!hasScheme(candidate.c_str())) {
     // Never interpret javascript:, file:, etc. as a web host.
     if (candidate.indexOf("://") >= 0) return false;
@@ -99,6 +106,9 @@ static bool splitBase(const char *base, char *scheme, size_t sc, char *host,
 bool BrowserService::resolveUrl(const char *base, const char *href, char *out, size_t cap) {
   if (!href || !href[0] || !out || cap < 12) return false;
   out[0] = 0;
+  if (!strcmp(href,"mtt:start") || !strcmp(href,"mtt:history") ||
+      !strcmp(href,"mtt:bookmark") || !strcmp(href,"mtt:help") ||
+      !strcmp(href,"mtt:about")) return copyUrl(out,cap,href);
   if (hasScheme(href)) return validWebUrl(href) && copyUrl(out, cap, href);
   // Never treat another scheme (javascript:, data:, file:) as a relative link.
   if (strncmp(href, "//", 2) != 0) {
@@ -177,7 +187,8 @@ BrowserService::~BrowserService() {
   if (lines) free(lines);
   if (links) free(links);
   if (history) free(history);
-  lines = nullptr; links = nullptr; history = nullptr;
+  if (bookmarks) free(bookmarks);
+  lines = nullptr; links = nullptr; history = nullptr; bookmarks = nullptr;
   poolsReady = false;
 }
 
@@ -187,27 +198,32 @@ bool BrowserService::begin(StorageService *storageRef) {
     lines = (BrowserLine*)heap_caps_malloc(sizeof(BrowserLine) * MAX_LINES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     links = (BrowserLink*)heap_caps_malloc(sizeof(BrowserLink) * MAX_LINKS, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     history = (char (*)[192])heap_caps_malloc(sizeof(char[192]) * HISTORY_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    bookmarks = (char (*)[192])heap_caps_malloc(sizeof(char[192]) * BOOKMARK_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     // Fallback keeps the browser usable on boards where PSRAM init failed, but
     // Safe Mode can still be used if internal memory becomes constrained.
     if (!lines) lines = (BrowserLine*)malloc(sizeof(BrowserLine) * MAX_LINES);
     if (!links) links = (BrowserLink*)malloc(sizeof(BrowserLink) * MAX_LINKS);
     if (!history) history = (char (*)[192])malloc(sizeof(char[192]) * HISTORY_MAX);
-    if (!lines || !links || !history) {
+    if (!bookmarks) bookmarks = (char (*)[192])malloc(sizeof(char[192]) * BOOKMARK_MAX);
+    if (!lines || !links || !history || !bookmarks) {
       if (lines) free(lines);
       if (links) free(links);
       if (history) free(history);
-      lines = nullptr; links = nullptr; history = nullptr; poolsReady = false;
+      if (bookmarks) free(bookmarks);
+      lines = nullptr; links = nullptr; history = nullptr; bookmarks = nullptr; poolsReady = false;
       snprintf(errorText, sizeof(errorText), "Browser memory unavailable");
       return false;
     }
     for (int i = 0; i < MAX_LINES; ++i) new (&lines[i]) BrowserLine();
     for (int i = 0; i < MAX_LINKS; ++i) new (&links[i]) BrowserLink();
     memset(history, 0, sizeof(char[192]) * HISTORY_MAX);
+    memset(bookmarks, 0, sizeof(char[192]) * BOOKMARK_MAX);
     poolsReady = true;
   }
   resetPage();
   cachedPage = false;
   historyUsed = 0; requestedUrl[0] = 0; retryPending = false;
+  loadBookmarks();
   snprintf(currentUrl, sizeof(currentUrl), "%s", "https://qeafivels.com/");
   return true;
 }
@@ -433,6 +449,103 @@ bool BrowserService::download(const String &inputUrl, String &savedPath, String 
   return false;
 }
 
+// Qeafbrowser internal pages share the existing VQEAF LCD, WiFi, SD and keys.
+static const char *const kBrowserBookmarksPath="/System/Apps/Data/qeafbrowser_bookmarks.txt";
+void BrowserService::loadBookmarks() {
+  bookmarkUsed=0;
+  if(!bookmarks || !storage || !storage->mounted()) return;
+  storage->recoverAtomicFile(kBrowserBookmarksPath);
+  File f=storage->fs().open(kBrowserBookmarksPath,FILE_READ);
+  if(!f || f.isDirectory()) { if(f) f.close(); return; }
+  // Bounded byte reader also works with the firmware's host FS mock;
+  // Stream::readStringUntil is not part of its minimal File interface.
+  char line[192];size_t len=0;bool overflow=false;
+  while(f.available() && bookmarkUsed<BOOKMARK_MAX) {
+    char ch=0;
+    if(f.readBytes(&ch,1)!=1) break;
+    if(ch!='\n') {
+      if(ch!='\r') {
+        if(len<sizeof(line)-1) line[len++]=ch;
+        else overflow=true;
+      }
+      continue;
+    }
+    line[len]=0;
+    if(!overflow && len && validWebUrl(line))
+      snprintf(bookmarks[bookmarkUsed++],192,"%s",line);
+    len=0;overflow=false;
+  }
+  if(!overflow && len && bookmarkUsed<BOOKMARK_MAX) {
+    line[len]=0;
+    if(validWebUrl(line)) snprintf(bookmarks[bookmarkUsed++],192,"%s",line);
+  }
+  f.close();
+}
+bool BrowserService::saveBookmarks() {
+  if(!storage || !storage->mounted()) return false;
+  storage->ensureDir(StoragePaths::APPS_DATA);
+  char data[BOOKMARK_MAX*192+1];
+  size_t used=0;
+  for(int i=0;i<bookmarkUsed;++i) {
+    size_t n=strlen(bookmarks[i]);
+    if(n+1>sizeof(data)-used) return false;
+    memcpy(data+used,bookmarks[i],n);used+=n;data[used++]='\n';
+  }
+  return storage->writeAtomic(kBrowserBookmarksPath,(const uint8_t*)data,used);
+}
+bool BrowserService::bookmarkCurrent() {
+  if(!bookmarks || !validWebUrl(currentUrl)) return false;
+  for(int i=0;i<bookmarkUsed;++i) if(!strcmp(bookmarks[i],currentUrl)) return true;
+  const int end=bookmarkUsed<BOOKMARK_MAX?bookmarkUsed++:BOOKMARK_MAX-1;
+  for(int i=end;i>0;--i) memcpy(bookmarks[i],bookmarks[i-1],192);
+  strcpy(bookmarks[0],currentUrl);
+  return !storage || !storage->mounted() || saveBookmarks();
+}
+bool BrowserService::renderInternal(const char *url,bool addHistory) {
+  if(!poolsReady || !url) return false;
+  resetPage();
+  snprintf(currentUrl,sizeof currentUrl,"%s",url);
+  snprintf(requestedUrl,sizeof requestedUrl,"%s",url);
+  retryPending=false;
+  if(addHistory) pushHistory(currentUrl);
+  if(!strcmp(url,"mtt:start")) {
+    snprintf(pageTitle,sizeof pageTitle,"Qeafbrowser Speed Dial");
+    addWrappedText("Qeafbrowser - Speed Dial");
+    int i=addLink("https://qeafivels.com/","Qeafivels");addWrappedText("Qeafivels",i);
+    i=addLink("mtt:bookmark","Bookmarks");addWrappedText("Bookmarks",i);
+    i=addLink("mtt:history","History");addWrappedText("History",i);
+    i=addLink("mtt:help","Help");addWrappedText("Help",i);
+    i=addLink("mtt:about","About");addWrappedText("About",i);
+  }else if(!strcmp(url,"mtt:history")) {
+    snprintf(pageTitle,sizeof pageTitle,"Browser history");
+    addWrappedText("Recently visited");
+    int shown=0;
+    for(int n=0;n<historyUsed && shown<MAX_LINKS;++n) {
+      if(!validWebUrl(history[n])) continue;
+      int i=addLink(history[n],history[n]);addWrappedText(history[n],i);++shown;
+    }
+    if(!shown)addWrappedText("No visited pages yet");
+  }else if(!strcmp(url,"mtt:bookmark")) {
+    snprintf(pageTitle,sizeof pageTitle,"Bookmarks");
+    addWrappedText("Saved pages");
+    for(int n=0;n<bookmarkUsed;++n) {
+      int i=addLink(bookmarks[n],bookmarks[n]);addWrappedText(bookmarks[n],i);
+    }
+    if(!bookmarkUsed)addWrappedText("Save a page from Options");
+  }else if(!strcmp(url,"mtt:help")) {
+    snprintf(pageTitle,sizeof pageTitle,"Browser help");
+    addWrappedText("UP DOWN scroll. LEFT RIGHT focus links. OK opens selected link.");
+    addWrappedText("Options: enter URL, reload, history, bookmark, downloads.");
+    addWrappedText("JavaScript is not supported.");
+  }else if(!strcmp(url,"mtt:about")) {
+    snprintf(pageTitle,sizeof pageTitle,"About Qeafbrowser");
+    addWrappedText("VQEAF-OS native Qeafbrowser integration.");
+    addWrappedText("HTTP and verified HTTPS use the OS network stack.");
+  }else return false;
+  httpStatus=200;
+  return true;
+}
+
 void BrowserService::pushHistory(const char *url) {
   if (!history || !url || !url[0]) return;
   if (historyUsed && !strcmp(history[0], url)) return;
@@ -487,6 +600,7 @@ bool BrowserService::fetchAndParse(const char *url, bool addHistory) {
   snprintf(requestedUrl, sizeof(requestedUrl), "%s", targetUrl);
   retryPending = true;
   url = targetUrl;
+  if (!strncmp(targetUrl,"mtt:",4)) return renderInternal(targetUrl, addHistory);
   resetPage();
   if (!poolsReady || !lines || !links || !history) {
     snprintf(errorText, sizeof(errorText), "Browser memory unavailable");
@@ -833,12 +947,25 @@ void BrowserService::parseHtml(const char *src, size_t len) {
     while (*t && !isspace((unsigned char)*t) && *t!='>' && *t!='/' && n<19) name[n++]=*t++;
     name[n]=0;
 
-    if (!strcmp(name,"script") || !strcmp(name,"style") || !strcmp(name,"noscript") || !strcmp(name,"svg")) {
+    if (!strcmp(name,"script") || !strcmp(name,"style") || !strcmp(name,"noscript") ||
+        !strcmp(name,"svg") || !strcmp(name,"template") || !strcmp(name,"iframe") ||
+        !strcmp(name,"object") || !strcmp(name,"canvas")) {
       skip = !closing; return;
     }
     if (skip) return;
     if (!strcmp(name,"title")) { inTitle = !closing; return; }
-    if (!strcmp(name,"a")) {
+    if (!closing && !strcmp(name,"card") && !pageTitle[0]) {
+      char cardTitle[64]={0};
+      if(htmlAttr(raw,"title",cardTitle,sizeof(cardTitle)) && cardTitle[0])
+        snprintf(pageTitle,sizeof(pageTitle),"%s",cardTitle);
+    }
+    // WML <anchor> wraps its label and nested <go href="..."/> provides target.
+    if (!closing && !strcmp(name,"go") && inAnchor) {
+      char goHref[192]={0};
+      if(htmlAttr(raw,"href",goHref,sizeof(goHref))) strcpy(anchorHref,goHref);
+      return;
+    }
+    if (!strcmp(name,"a") || !strcmp(name,"anchor")) {
       if (!closing) {
         inAnchor = true; anchorN = 0; anchorText[0] = 0; anchorHref[0] = 0;
         htmlAttr(raw, "href", anchorHref, sizeof(anchorHref));

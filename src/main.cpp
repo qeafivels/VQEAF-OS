@@ -21,6 +21,14 @@
 #include "services/StorageService.h"
 #include "services/MusicService.h"
 #include "services/NotificationService.h"
+#include "services/UsbLinkMonitor.h"
+#if defined(ARDUINO_ARCH_ESP32) && defined(ARDUINO_USB_MODE) && ARDUINO_USB_MODE && \
+    defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT
+  #include <HWCDC.h>
+  #define VQEAF_HAS_NATIVE_USB_HOST_DETECTION 1
+#else
+  #define VQEAF_HAS_NATIVE_USB_HOST_DETECTION 0
+#endif
 #include "services/SystemService.h"
 #include "services/WiFiProfileStore.h"
 #include "services/ShellService.h"
@@ -34,7 +42,84 @@
 #include "apps/Apps.h"
 #include "apps/PixelSnakeApp.h"
 
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+#include "lua/QeLuaRuntime.h"
+#include "lua/QeLuaFramePolicy.h"
+static QeLuaRuntime luaVm;
+static uint32_t luaPreviousAt=0, luaNextFrameAt=0;
+static char luaRunningName[41]="Lua application";
+// All beta drawing is clipped by VM to the 240x270 application viewport.
+// Existing system chrome/footer and original VQEAF renderer stay unchanged.
+// Stage all script primitives offscreen. Never expose engine.clear() on LCD.
+static void luaRect(void *u,int x,int y,int w,int h,uint16_t color) {
+  static_cast<TFT_eSprite*>(u)->fillRect(x,y,w,h,color);
+}
+static void luaText(void *u,int x,int y,const char *value,uint16_t color) {
+  auto *canvas=static_cast<TFT_eSprite*>(u);
+  canvas->setTextColor(color); // Preserve background behind text.
+  canvas->setTextFont(1);
+  canvas->setTextSize(1);
+  canvas->setCursor(x,y);
+  canvas->print(value);
+}
+static uint32_t luaMillis(void*) {return millis();}
+#endif
+
 static TFT_eSPI tft;
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+// 240x270x2 = 129,600B; two full RGB565 images require ~253 KiB PSRAM.
+// The 29px status bar / 21px softkeys stay with the unchanged OS renderer.
+static TFT_eSprite luaCanvas(&tft);
+static uint16_t *luaLastFrame=nullptr;
+static QeLuaFramePolicy luaFramePolicy;
+static uint32_t luaFlushed=0, luaUnchanged=0, luaFlushUs=0, luaStatsAt=0;
+static bool luaPrepareCanvas() {
+  if (!psramFound() || heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) <
+      2 * QeLuaFramePolicy::kBytes + 65536) return false;
+  luaCanvas.setAttribute(PSRAM_ENABLE, 1);
+  luaCanvas.setColorDepth(16);
+  if (!luaCanvas.createSprite(QeLuaFramePolicy::kWidth, QeLuaFramePolicy::kHeight)) return false;
+  luaLastFrame=static_cast<uint16_t*>(heap_caps_malloc(QeLuaFramePolicy::kBytes,
+                                      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (!luaLastFrame) { luaCanvas.deleteSprite(); return false; }
+  luaCanvas.fillSprite(TFT_BLACK);
+  luaFramePolicy.invalidate();
+  luaFlushed=luaUnchanged=luaFlushUs=0;
+  luaStatsAt=millis();
+  Serial.printf("[VQEAF][LUA][FRAME] offscreen + snapshot ready, %lu bytes PSRAM\n",
+                (unsigned long)(2 * QeLuaFramePolicy::kBytes));
+  return true;
+}
+static void luaReleaseCanvas() {
+  luaCanvas.deleteSprite();
+  if (luaLastFrame) { heap_caps_free(luaLastFrame); luaLastFrame=nullptr; }
+  luaFramePolicy.invalidate();
+}
+static bool luaPresentFrame() {
+  if (!luaCanvas.created() || !luaLastFrame) return false;
+  const auto *pixels=static_cast<const uint16_t*>(luaCanvas.getPointer());
+  if (!pixels) return false;
+  // One LCD transaction at the end of a complete successful callback.
+  // The full-image memcmp also skips redundant clears of an unchanged frame.
+  if (luaFramePolicy.needsPresent(pixels,luaLastFrame)) {
+    const uint32_t started=micros();
+    luaCanvas.pushSprite(0,29); // TFT_eSprite preserves TFT swapBytes state.
+    luaFlushUs+=uint32_t(micros()-started);
+    memcpy(luaLastFrame,pixels,QeLuaFramePolicy::kBytes);
+    luaFramePolicy.markPresented();
+    ++luaFlushed;
+  } else ++luaUnchanged;
+  const uint32_t now=millis();
+  if (uint32_t(now-luaStatsAt)>=5000) {
+    Serial.printf("[VQEAF][LUA][FRAME] flush=%lu same=%lu avg_spi_us=%lu free_psram=%lu\n",
+      (unsigned long)luaFlushed,(unsigned long)luaUnchanged,
+      (unsigned long)(luaFlushed?luaFlushUs/luaFlushed:0),
+      (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    luaFlushed=luaUnchanged=luaFlushUs=0; luaStatsAt=now;
+  }
+  return true;
+}
+#endif
 static VqeafUI ui(tft); // compatibility adapter over the existing UI implementation
 static InputManager input;
 static SettingsStore settings;
@@ -42,6 +127,8 @@ static StorageService storage;
 static MusicService music;
 static TextKeyboard keyboard;
 static NotificationService notifications;
+static UsbLinkMonitor usbLinkMonitor;
+static uint32_t lastUsbPollAt=0;
 static SystemService systemService;
 static WiFiProfileStore wifiProfiles;
 static WiFiConnectionService wifiConnection;
@@ -187,6 +274,9 @@ static void enterScreen(ScreenId s, bool animate = true, bool resume = false) {
   const uint32_t navStartUs=micros();
 #endif
   ScreenId from = screen;
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+  if (from == ScreenId::LuaApp && s != ScreenId::LuaApp) { luaVm.stop(); luaReleaseCanvas(); }
+#endif
   // Forced navigation (card removal/auto-lock/etc.) must invalidate a pending
   // confirmation so it can never confirm a stale app after the new screen loads.
   if (s != from && osBackConfirm.active()) osBackConfirm.cancel();
@@ -218,6 +308,56 @@ static void enterScreen(ScreenId s, bool animate = true, bool resume = false) {
         }
         // Browser and Text Viewer normally consume this flag. Snake does not.
         appCtx.pendingPackageLaunch = false;
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+      } else if (!strcmp(meta.type, "lua")) {
+        appCtx.pendingPackageLaunch = false;
+        if (systemService.safeMode() || !storage.mounted()) {
+          launchFeedback="Lua unavailable: Safe Mode or no microSD";
+          s=ScreenId::Applications;
+        } else {
+          // get() just verified the signed installed receipt and all sections.
+          // Check the copied source against the same receipt hash AGAIN before execution.
+          const String base=appInstaller.installedPath(meta.id);
+          File receipt=storage.fs().open(base+"/receipt.bin",FILE_READ);
+          uint8_t signedHeader[Qeapp::HEADER_BYTES];
+          const bool hasReceipt=receipt && !receipt.isDirectory() &&
+              receipt.size()==Qeapp::HEADER_BYTES+Qeapp::SIGNATURE_BYTES &&
+              receipt.read(signedHeader,sizeof signedHeader)==(int)sizeof signedHeader &&
+              memcmp(signedHeader,"QEAPP2\r\n",8)==0;
+          if(receipt)receipt.close();
+          File source=storage.fs().open(base+"/payload.txt",FILE_READ);
+          const size_t size=source && !source.isDirectory()?size_t(source.size()):0;
+          char *code=(hasReceipt && size>0 && size<=QeLuaRuntime::kMaxSource) ?
+              static_cast<char*>(heap_caps_malloc(size+1,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)) : nullptr;
+          bool valid=source && code &&
+              source.read(reinterpret_cast<uint8_t*>(code),size)==(int)size;
+          if(source)source.close();
+          if(valid) {
+            Qeapp::Sha256 sourceHash;uint8_t digest[32];
+            sourceHash.update(reinterpret_cast<const uint8_t*>(code),size);
+            sourceHash.finish(digest);
+            valid=Qeapp::equalHash(digest,signedHeader+84) && !memchr(code,0,size);
+            if(valid)code[size]=0;
+          }
+          const bool canvasReady=valid && luaPrepareCanvas();
+          QeLuaRuntime::Draw draw={luaRect,luaText,luaMillis,&luaCanvas};
+          const bool started=canvasReady && luaVm.start(code,size,draw,192*1024);
+          if(code)heap_caps_free(code);
+          if(!started) {
+            launchFeedback=!valid?"Lua payload invalid or changed":
+                           !canvasReady?"Lua display buffers unavailable in PSRAM":luaVm.error();
+            luaReleaseCanvas();
+            Serial.printf("[VQEAF][LUA] launch rejected id=%s reason=%s\n",meta.id,launchFeedback.c_str());
+            notifications.push("Lua app error",launchFeedback);
+            s=ScreenId::Applications;
+          } else {
+            snprintf(luaRunningName,sizeof luaRunningName,"%s",meta.name);
+            luaPreviousAt=luaNextFrameAt=millis();
+            Serial.printf("[VQEAF][LUA] started id=%s bytes=%lu\n",meta.id,(unsigned long)size);
+            s=ScreenId::LuaApp;
+          }
+        }
+#endif
       } else if (!strcmp(meta.type, "web")) {
         appCtx.pendingBrowserUrl = meta.entry;
         s = ScreenId::Browser;
@@ -245,7 +385,13 @@ static void enterScreen(ScreenId s, bool animate = true, bool resume = false) {
 #else
   const bool heavyRoute = from==ScreenId::AppInstaller || s==ScreenId::AppInstaller ||
        from==ScreenId::Applications || s==ScreenId::Applications ||
-       s==ScreenId::Browser || s==ScreenId::TextViewer;
+       s==ScreenId::Browser || s==ScreenId::TextViewer
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+       // Never play LCD-wide wipe/interstitial while a Lua sprite is active.
+       // It is composited separately and cannot participate in transitionOut.
+       || from==ScreenId::LuaApp || s==ScreenId::LuaApp
+#endif
+       ;
 #endif
   if (animate && !heavyRoute && from != ScreenId::Launcher && s != ScreenId::Launcher &&
       from != ScreenId::Explorer && s != ScreenId::Explorer &&
@@ -263,7 +409,15 @@ static void enterScreen(ScreenId s, bool animate = true, bool resume = false) {
                   s == ScreenId::Themes ? "Themes" : "App installer");
   }
   screen = s;
-  if (s != ScreenId::Idle && s != ScreenId::Lock && s != ScreenId::Splash) ui.clearContent();
+  // Avoid a physical blank frame on Back-cancel when resuming the SAME VM.
+  if (s != ScreenId::Idle && s != ScreenId::Lock && s != ScreenId::Splash
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+      // Lua paints its entire viewport offscreen and pushes the completed
+      // first frame. Do not expose a cleared LCD while that callback runs,
+      // either at launch or when dismissing the Back confirmation.
+      && s != ScreenId::LuaApp
+#endif
+      ) ui.clearContent();
   switch (s) {
     case ScreenId::Idle:
       restoreBacklight(); drawIdle(); break;
@@ -293,6 +447,21 @@ static void enterScreen(ScreenId s, bool animate = true, bool resume = false) {
       if (!resume) browserApp.enter(appCtx); browserApp.draw(appCtx); break;
     case ScreenId::Snake:
       pixelSnakeApp.draw(appCtx); break;
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+    case ScreenId::LuaApp:
+      ui.chrome(luaRunningName,wifiConnected(),false,false,settings.data().hour12);
+      ui.softkeys("","","Back");
+      if (resume) luaFramePolicy.invalidate(); // Restore viewport beneath OS dialog.
+      if ((!resume && !luaVm.render()) || !luaPresentFrame()) {
+        launchFeedback=luaVm.running()?"Lua viewport flush failed":luaVm.error();
+        notifications.push("Lua runtime",launchFeedback);
+        enterScreen(ScreenId::Applications,false);
+      } else if (!resume) {
+        // First frame already visible: wait full 50ms before the next callback.
+        luaPreviousAt=millis(); luaNextFrameAt=luaPreviousAt+50;
+      }
+      break;
+#endif
     case ScreenId::Shell:
       if (!resume) shellApp.enter(appCtx); shellApp.draw(appCtx); break;
     case ScreenId::Settings:
@@ -525,6 +694,7 @@ void setup() {
 
   bool sdOk = storage.begin();
   if (sdOk) {
+    notifications.push("microSD detected", "Memory card ready");
     storage.ensureSystemLayout();
     Serial.println("SD layout: /System/{Cache,Themes,Apps,Downloads,Logs,Temp} + /Media + /Documents");
   }
@@ -646,6 +816,23 @@ void loop() {
   reportUiPerformanceIfDue();
 #endif
   diagPoll();
+#if VQEAF_HAS_NATIVE_USB_HOST_DETECTION
+  // Native USB Serial/JTAG host/enumeration presence. This cannot detect
+  // charger-only Type-C insertion or a disconnect that cuts all device power.
+  // Never change UART routing, USB pins, or emit a notice on one noisy sample.
+  if ((uint32_t)(millis()-lastUsbPollAt)>=100U) {
+    const uint32_t now=millis();
+    lastUsbPollAt=now;
+    const UsbLinkMonitor::Event usbEvent=usbLinkMonitor.sample(HWCDC::isPlugged(),now);
+    if(usbEvent==UsbLinkMonitor::Event::HostConnected) {
+      notifications.push("USB connected","Computer connected via Type-C");
+      Serial.println("[VQEAF][USB] host=CONNECTED");
+    } else if(usbEvent==UsbLinkMonitor::Event::HostDisconnected) {
+      notifications.push("USB disconnected","Type-C data connection lost");
+      Serial.println("[VQEAF][USB] host=DISCONNECTED");
+    }
+  }
+#endif
   if (!systemService.safeMode()) {
     music.update();
     musicApp.tick(appCtx, screen == ScreenId::Music && !osBackConfirm.active());
@@ -661,7 +848,11 @@ void loop() {
     if (screen == ScreenId::Explorer) explorer.draw(appCtx);
     if (screen == ScreenId::Files || screen == ScreenId::Gallery ||
         screen == ScreenId::Themes || screen == ScreenId::TextViewer ||
-        screen == ScreenId::AppInstaller || screen == ScreenId::Snake) enterScreen(ScreenId::Idle, false);
+        screen == ScreenId::AppInstaller || screen == ScreenId::Snake
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+        || screen == ScreenId::LuaApp
+#endif
+        ) enterScreen(ScreenId::Idle, false);
   } else if (cardEvent == StorageService::CardEvent::Mounted) {
     Serial.printf("[S3DIAG][SD] event=MOUNTED errors=%u uptime_ms=%lu\n", storage.ioErrors(), (unsigned long)millis());
     notifications.push("microSD mounted", "Filesystem ready again");
@@ -676,6 +867,21 @@ void loop() {
   }
   stopwatchApp.tick(appCtx, screen == ScreenId::Stopwatch && !osBackConfirm.active());
   if (screen == ScreenId::Snake && !osBackConfirm.active()) pixelSnakeApp.tick(appCtx);
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+  // Never repaint or process scripted callbacks behind the OS Back modal.
+  if (screen == ScreenId::LuaApp && !osBackConfirm.active() &&
+      int32_t(millis()-luaNextFrameAt)>=0) {
+    uint32_t now=millis();
+    const float dt=float(now-luaPreviousAt)/1000.0f;
+    luaPreviousAt=now;luaNextFrameAt=now+50; // beta: cap to ~20 FPS
+    if(!luaVm.update(dt) || !luaVm.render() || !luaPresentFrame()) {
+      String reason=luaVm.error();
+      Serial.printf("[VQEAF][LUA] callback rejected reason=%s\n",reason.c_str());
+      notifications.push("Lua runtime",reason);
+      enterScreen(ScreenId::Applications,false);
+    }
+  }
+#endif
   galleryApp.tick(appCtx, screen == ScreenId::Gallery && !osBackConfirm.active());
   wifiApp.tick(appCtx, screen == ScreenId::WiFi);
   systemService.update(notifications);
@@ -854,6 +1060,20 @@ void loop() {
       next = browserApp.handle(appCtx,e); break;
     case ScreenId::Snake:
       next = pixelSnakeApp.handle(appCtx,e); break;
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+    case ScreenId::LuaApp:
+      if(e.pressed && !e.longPress && e.key==Key::A) next=ScreenId::Applications;
+      else if(!e.longPress && !osBackConfirm.active()) {
+        const char* name=e.key==Key::Up?"up":e.key==Key::Down?"down":
+          e.key==Key::Left?"left":e.key==Key::Right?"right":
+          e.key==Key::Start?"start":e.key==Key::Option?"option":nullptr;
+        if(name && !luaVm.key(name,e.pressed)) {
+          notifications.push("Lua runtime",luaVm.error());
+          next=ScreenId::Applications;
+        }
+      }
+      break;
+#endif
     case ScreenId::Shell:
       next = shellApp.handle(appCtx,e); break;
     case ScreenId::Settings:

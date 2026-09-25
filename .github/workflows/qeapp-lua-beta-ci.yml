@@ -1,0 +1,60 @@
+name: QEAPP Studio Lua beta compat (ESP32-S3)
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/qeapp-lua-compat-v251]
+    paths:
+      - 'src/**'
+      - 'tools/test_lua_beta*'
+      - 'tools/bootstrap_lua.py'
+      - 'tools/provision_lua_beta_key.py'
+      - 'tools/lua_beta_host/**'
+      - 'tools/test_lua_frame_present.py'
+      - 'tools/test_lua_transition_noblank.py'
+      - 'tools/build_qeapp.py'
+      - 'platformio.ini'
+      - '.github/workflows/qeapp-lua-beta-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  host-and-target:
+    runs-on: ubuntu-latest
+    timeout-minutes: 28
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install host dependencies and ESP32 toolchain
+        run: python -m pip install cryptography pillow platformio
+      - name: Regression - dual-key beta and existing production installer
+        run: |
+          python tools/test_lua_beta_compat.py
+          python tools/test_v15_signature.py
+          python tools/test_backguard_v251.py
+      - name: Fetch official Lua 5.4.8 with mandatory SHA256 verification
+        run: python tools/bootstrap_lua.py --firmware-root .
+      - name: Test actual bounded Lua runtime using official C interpreter on host
+        run: python tools/test_lua_beta_vm.py
+      - name: Test Lua PSRAM frame gate and modal repaint on host
+        run: |
+          python tools/test_lua_frame_present.py
+          python tools/test_lua_transition_noblank.py
+      - name: Build unchanged default stock OS (production key, Lua disabled)
+        run: pio run -e vqeaf_os
+      - name: Generate single-run ephemeral beta key - never publish a private key
+        run: python tools/provision_lua_beta_key.py --private "${{ runner.temp }}/qeapp-ci-ephemeral-publisher.pem"
+      - name: Build experimental beta with P-256 trust pin and PSRAM Lua 5.4
+        run: pio run -e vqeaf_lua_beta
+      - name: CI-only firmware and build log (temporary throwaway publisher key)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vqeaf-lua-beta-ci-only-ephemeral-key-NOT-FOR-USER-APPS
+          path: |
+            .pio/build/vqeaf_lua_beta/firmware.bin
+            .pio/build/vqeaf_lua_beta/firmware.elf
+            .pio/build/vqeaf_os/firmware.bin
+          if-no-files-found: warn

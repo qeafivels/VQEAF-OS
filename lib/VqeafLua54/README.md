@@ -1,0 +1,2 @@
+# VqeafLua54 (experimental)
+Lua 5.4.8 official C source is downloaded to `src/` by `python tools/bootstrap_lua.py` with exact SHA-256 validation. See UPSTREAM.txt and LICENSE.lua (MIT copyright Lua.org/PUC-Rio). The `src/` tree is gitignored to avoid mistakenly distributing unverified or modified source; the stock `vqeaf_os` build does not link the VM. Only the optional `vqeaf_lua_beta` profile uses the interpreter.

@@ -8,6 +8,15 @@
 #else
 #include "QeappTrustKey.h"
 #endif
+#if defined(VQEAF_LUA_BETA_TRUST) && VQEAF_LUA_BETA_TRUST
+// Do not replace the production key: existing signed text/web apps must remain valid.
+// The beta header is generated LOCALLY and has the upstream QEAPP_TRUST_* symbols.
+#define QEAPP_TRUST_KEY_ID QEAPP_LUA_BETA_KEY_ID
+#define QEAPP_TRUST_PUBKEY QEAPP_LUA_BETA_PUBKEY
+#include "QeappTrustKeyLuaBeta.h"
+#undef QEAPP_TRUST_KEY_ID
+#undef QEAPP_TRUST_PUBKEY
+#endif
 #if defined(QEAPP_HOST_OPENSSL)
 #include <openssl/ecdsa.h>
 #include <openssl/ec.h>
@@ -25,11 +34,23 @@ namespace Qeapp {
 static uint32_t readKeyId(const uint8_t *b) {
  return uint32_t(b[0]) | uint32_t(b[1])<<8 | uint32_t(b[2])<<16 | uint32_t(b[3])<<24;
 }
-bool verifySignature(const uint8_t digest[32],const uint8_t trailer[SIGNATURE_BYTES],const char *&error){
+bool verifySignature(const uint8_t digest[32],const uint8_t trailer[SIGNATURE_BYTES],const char *&error,const char *appType){
  error="";
  if(!digest||!trailer||memcmp(trailer,"QSIGP256",8)){error="Missing/invalid QEAPP signature";return false;}
  const uint32_t packageKey=readKeyId(trailer+8);
+ const uint8_t *publicKey=QEAPP_TRUST_PUBKEY;
+#if defined(VQEAF_LUA_BETA_TRUST) && VQEAF_LUA_BETA_TRUST
+ const bool beta=(packageKey==QEAPP_LUA_BETA_KEY_ID);
+ if(beta) publicKey=QEAPP_LUA_BETA_PUBKEY;
+ if(appType) {
+   if(beta && strcmp(appType,"lua")!=0){error="Lua beta key cannot sign text/web apps";return false;}
+   if(!beta && !strcmp(appType,"lua")){error="Lua apps require Lua beta publisher key";return false;}
+ }
+ if(packageKey!=QEAPP_TRUST_KEY_ID && !beta){
+#else
+ (void)appType;
  if(packageKey!=QEAPP_TRUST_KEY_ID){
+#endif
    // This is not a signature bypass. Explain why the separately signed
    // Pixel Snake demo cannot install on the production firmware profile.
    static char keyError[96];
@@ -40,7 +61,7 @@ bool verifySignature(const uint8_t digest[32],const uint8_t trailer[SIGNATURE_BY
               (unsigned long)packageKey,(unsigned long)QEAPP_TRUST_KEY_ID);
    error=keyError;return false;
  }
- if(QEAPP_TRUST_PUBKEY[0]!=0x04||sizeof(QEAPP_TRUST_PUBKEY)!=65){error="Invalid built-in public key";return false;}
+ if(publicKey[0]!=0x04){error="Invalid built-in public key";return false;}
  const uint8_t *sig=trailer+12;
 #if defined(QEAPP_HOST_OPENSSL)
  EC_KEY *key=EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
@@ -49,7 +70,7 @@ bool verifySignature(const uint8_t digest[32],const uint8_t trailer[SIGNATURE_BY
  EC_POINT *point=EC_POINT_new(group);
  BIGNUM *r=BN_bin2bn(sig,32,nullptr), *s=BN_bin2bn(sig+32,32,nullptr);
  ECDSA_SIG *es=ECDSA_SIG_new();
- bool prepared=point&&r&&s&&es&&EC_POINT_oct2point(group,point,QEAPP_TRUST_PUBKEY,65,nullptr)==1&&EC_KEY_set_public_key(key,point)==1;
+ bool prepared=point&&r&&s&&es&&EC_POINT_oct2point(group,point,publicKey,65,nullptr)==1&&EC_KEY_set_public_key(key,point)==1;
  if(prepared){prepared=(ECDSA_SIG_set0(es,r,s)==1);if(prepared){r=nullptr;s=nullptr;}}
  int verified=prepared?ECDSA_do_verify(digest,32,es,key):0;
  if(r)BN_free(r);
@@ -63,7 +84,7 @@ bool verifySignature(const uint8_t digest[32],const uint8_t trailer[SIGNATURE_BY
  mbedtls_ecp_group group;mbedtls_ecp_point point;mbedtls_mpi r,s;
  mbedtls_ecp_group_init(&group);mbedtls_ecp_point_init(&point);mbedtls_mpi_init(&r);mbedtls_mpi_init(&s);
  int rc=mbedtls_ecp_group_load(&group,MBEDTLS_ECP_DP_SECP256R1);
- if(!rc)rc=mbedtls_ecp_point_read_binary(&group,&point,QEAPP_TRUST_PUBKEY,65);
+ if(!rc)rc=mbedtls_ecp_point_read_binary(&group,&point,publicKey,65);
  if(!rc)rc=mbedtls_ecp_check_pubkey(&group,&point);
  if(!rc)rc=mbedtls_mpi_read_binary(&r,sig,32);
  if(!rc)rc=mbedtls_mpi_read_binary(&s,sig+32,32);

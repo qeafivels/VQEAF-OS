@@ -1,0 +1,4 @@
+// GENERATED-ONLY; do not commit actual keys.
+// Run: python tools/provision_lua_beta_key.py --private <outside-repo PEM>
+// You may reuse your existing signing PEM with --existing-private instead.
+// The generated header defines QEAPP_TRUST_KEY_ID=0x544c5541 and QEAPP_TRUST_PUBKEY[65].

@@ -23,6 +23,9 @@ class OsBackConfirm {
           to == ScreenId::Collection || to == ScreenId::Files ||
           to == ScreenId::Idle)) return false;
     switch (from) {
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+      case ScreenId::LuaApp:
+#endif
       case ScreenId::Snake:
       case ScreenId::Browser:
       case ScreenId::Music:

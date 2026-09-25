@@ -1,5 +1,6 @@
 #include "SketchpadApp.h"
 #include <esp_heap_caps.h>
+#include <stdlib.h>
 // Original implementation inspired by legacy E524546 Paint/Notes behavior.
 // No source from its vendor Lua runtime is linked into VQEAF-OS.
 namespace {
@@ -58,7 +59,7 @@ bool SketchpadApp::importLegacy(AppContext &ctx){
   f.close();
   if(read)buffer[size]='\0';
   const bool parsed=read && model_.importLegacy(buffer,size);
-  heap_caps_free(buffer);
+  free(buffer); // heap_caps_malloc memory is compatible with free() on ESP-IDF/host
   if(!parsed){message_="Invalid legacy page";return false;}
   dirty_=true;
   if(!save(ctx)){model_.clear();dirty_=false;return false;}

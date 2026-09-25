@@ -6,6 +6,8 @@ on:
     paths:
       - 'src/**'
       - 'tools/run_full_system_review.py'
+      - 'tools/test_*.py'
+      - 'tools/verify_*.py'
       - 'tools/vqeaf_host/**'
       - '.github/workflows/full-system-review-ci.yml'
 permissions:

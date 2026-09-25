@@ -1,5 +1,14 @@
 #if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
 #include "QeLuaRuntime.h"
+// ESP32 Arduino's C++ toolchain may hide the C99 LLONG_* limit macros even
+// though its GCC compiler supports 64-bit long long. Lua 5.4 detects those
+// macros in luaconf.h; expose compiler-proven limits to C++ without changing
+// the Lua 64-bit integer ABI used by its separately built C objects.
+#include <limits.h>
+#if !defined(LLONG_MAX) && defined(__LONG_LONG_MAX__)
+#define LLONG_MAX __LONG_LONG_MAX__
+#define ULLONG_MAX (2ULL * __LONG_LONG_MAX__ + 1ULL)
+#endif
 extern "C" {
 #include "lua.h"
 #include "lauxlib.h"

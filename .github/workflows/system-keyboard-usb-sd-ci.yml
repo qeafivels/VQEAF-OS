@@ -1,0 +1,32 @@
+name: VQEAF keyboard and Type-C/microSD regression
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/system-vkeyboard-usb-sd-notices]
+    paths:
+      - 'src/**'
+      - 'tools/test_system_keyboard_usb_sd.py'
+      - 'platformio.ini'
+      - '.github/workflows/system-keyboard-usb-sd-ci.yml'
+permissions:
+  contents: read
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile and execute USB state machine and source integration tests
+        run: python tools/test_system_keyboard_usb_sd.py
+      - name: Existing Qeafbrowser and Back/Lua frame structural regression
+        run: |
+          python tools/test_qeafbrowser_os.py
+          python tools/test_lua_transition_noblank.py
+          python tools/test_lua_frame_present.py
+      - name: Install PlatformIO
+        run: python -m pip install platformio
+      - name: Build complete production N16R8 firmware
+        run: pio run -e vqeaf_os

@@ -72,11 +72,8 @@ py -3 tools/provision_lua_beta_key.py --existing-private "D:\\SecureKeys\\qeapp_
 pio run -e vqeaf_lua_beta
 
 # Tạo ảnh Flash cài sạch chỉ chứa firmware beta đã ký tin cậy bởi public key của bạn:
-py -3 tools/build_factory_img.py --project-root . \
-  --build-dir .pio/build/vqeaf_lua_beta \
-  --output dist/VQEAF-OS_v251_LuaBeta_PERSONAL_factory.img
-py -3 tools/build_factory_img.py --verify-only \
-  --output dist/VQEAF-OS_v251_LuaBeta_PERSONAL_factory.img
+py -3 tools/build_factory_img.py --project-root . --build-dir .pio/build/vqeaf_lua_beta --output dist/VQEAF-OS_v251_LuaBeta_PERSONAL_factory.img
+py -3 tools/build_factory_img.py --verify-only --output dist/VQEAF-OS_v251_LuaBeta_PERSONAL_factory.img
 Get-FileHash dist/VQEAF-OS_v251_LuaBeta_PERSONAL_factory.img -Algorithm SHA256
 ```
 

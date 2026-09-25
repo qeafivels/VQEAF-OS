@@ -25,7 +25,7 @@ assert 'case ScreenId::Sketchpad:' in sys_service
 assert "StoragePaths::SKETCHPAD" in storage
 assert "writeAtomic(filePath()" in app
 assert "recoverAtomicFile(dest)" in app
-assert "heap_caps_free(buffer)" in app
+assert "free(buffer)" in app
 assert "model_.importLegacy(buffer,size)" in app
 assert "if(dirty_)" in app
 assert "ctx.ui.popupMenu(choices,3" in app

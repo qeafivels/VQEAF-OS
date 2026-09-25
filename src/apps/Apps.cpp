@@ -1988,13 +1988,39 @@ static void qeappInstallProgress(uint8_t percent,const char *phase,void *opaque)
 }
 
 // ---------------- QEAPP package manager ----------------
-static const char *const INSTALLER_OPTS[] = {
-  "Details", "Install / Update", "Inbox / Installed", "Rescan", "Applications", "Recover installs", "Reset app data"
+// The second action follows the selected verified package: on a later visit,
+// an installed signed app/game offers Open instead of reinstalling. Uninstall
+// remains a distinct deliberate action, never overloaded onto Open.
+static const char *const INSTALLER_OPTS_DEFAULT[] = {
+  "Details", "Install / Update", "Inbox / Installed", "Rescan",
+  "Applications", "Recover installs", "Reset app data"
+};
+static const char *const INSTALLER_OPTS_OPEN[] = {
+  "Details", "Open", "Inbox / Installed", "Rescan",
+  "Applications", "Recover installs", "Reset app data"
+};
+static const char *const INSTALLER_OPTS_UPDATE[] = {
+  "Details", "Update", "Inbox / Installed", "Rescan",
+  "Applications", "Recover installs", "Reset app data"
+};
+static const char *const INSTALLER_OPTS_INSTALLED[] = {
+  "Details", "Open", "Inbox / Installed", "Rescan",
+  "Applications", "Recover installs", "Reset app data", "Uninstall"
 };
 static constexpr int INSTALLER_OPT_COUNT = 7;
+static const char *const *installerOptions(bool installedTab, bool details,
+                                            bool verified, bool match, bool update) {
+  if(installedTab) return INSTALLER_OPTS_INSTALLED;
+  if(details && verified && match && !update) return INSTALLER_OPTS_OPEN;
+  if(details && verified && update) return INSTALLER_OPTS_UPDATE;
+  return INSTALLER_OPTS_DEFAULT;
+}
+static int installerOptionCount(bool installedTab) {
+  return installedTab ? INSTALLER_OPT_COUNT + 1 : INSTALLER_OPT_COUNT;
+}
 
 void AppInstallerApp::reload(AppContext &ctx, bool forceCatalogRefresh) {
-  count=0;index=0;offset=0;details=false;confirm=false;feedback="";selectedPath="";previewIconReady=false;willUpdate=false;installAllowed=false;confirmData=false;previousVersion="";
+  count=0;index=0;offset=0;details=false;confirm=false;feedback="";selectedPath="";previewIconReady=false;willUpdate=false;installAllowed=false;confirmData=false;installedMatch=false;previousVersion="";
   if (!ctx.storage.mounted()) {feedback="microSD not mounted";return;}
   if (!ctx.storage.ensureSystemLayout()) {
     feedback="SD folders unavailable or read-only";
@@ -2045,7 +2071,7 @@ void AppInstallerApp::enter(AppContext &ctx,ScreenId from){
     // the user is still holding START on a specific file in File Manager.
     count=index=offset=0;details=confirm=verified=false;
     feedback="";selectedPath=requested;previewIconReady=false;
-    willUpdate=installAllowed=confirmData=false;previousVersion="";
+    willUpdate=installAllowed=confirmData=installedMatch=false;previousVersion="";
     if(ctx.storage.mounted()){
       ctx.storage.ensureSystemLayout();
       ctx.installer.refreshIfNeeded();
@@ -2074,11 +2100,12 @@ void AppInstallerApp::paintRow(AppContext &ctx,int item,bool selected){
 }
 
 void AppInstallerApp::openDetails(AppContext &ctx){
- details=true;confirm=false;popup.close();verified=false;feedback="";previewIconReady=false;willUpdate=false;installAllowed=false;confirmData=false;previousVersion="";
+ details=true;confirm=false;popup.close();verified=false;feedback="";previewIconReady=false;willUpdate=false;installAllowed=false;confirmData=false;installedMatch=false;previousVersion="";
  if(installedTab){
    if(index>=0&&index<ctx.installer.count()){
      const auto &a=ctx.installer.at(index);selectedMeta=a.info;selectedPath=ctx.installer.installedPath(a.info.id);
      verified=ctx.installer.get(a.info.id,selectedMeta);
+     installedMatch=verified;
      if(!verified)feedback="Installed app signature invalid";
    }else feedback="No installed app selected";
  }else{
@@ -2092,10 +2119,11 @@ void AppInstallerApp::openDetails(AppContext &ctx){
    if(!installedTab){
      Qeapp::Meta old;
      if(ctx.installer.get(selectedMeta.id,old)){
+       installedMatch=true;
        previousVersion=old.version;
        willUpdate=Qeapp::compareVersion(selectedMeta.version,old.version)>0;
        installAllowed=willUpdate;
-       if(!willUpdate)feedback="Already installed / older version";
+       if(!willUpdate)feedback="Already installed - choose Open";
      }else if(ctx.storage.exists(ctx.installer.installedPath(selectedMeta.id))){
        installAllowed=false;feedback="Damaged install: recover manually";
      }
@@ -2141,8 +2169,11 @@ void AppInstallerApp::draw(AppContext &ctx){
        !strcmp(selectedMeta.type,"web")?"Access: network (HTTPS URL)":"Access: bundled text only"));
    if(previewIconReady)QeappIconBlit::draw(ctx.ui.display(),103,170,gQeappUiIconPixels);
    else ctx.ui.drawIcon(101,167,"App",ctx.ui.c().bg);
-   ctx.ui.softkeys("Options",installedTab?"Open":(installAllowed?(willUpdate?"Update":"Install"):"Disabled"),"Back");
-   drawPopup(ctx,popup,INSTALLER_OPTS,INSTALLER_OPT_COUNT);return;
+   ctx.ui.softkeys("Options",
+       (installedTab || (installedMatch && !willUpdate))?"Open":
+       (installAllowed?(willUpdate?"Update":"Install"):"Disabled"),"Back");
+   drawPopup(ctx,popup,installerOptions(installedTab,details,verified,installedMatch,willUpdate),
+             installerOptionCount(installedTab));return;
  }
  if(!count){ctx.ui.message(tab,installedTab?"No installed applications":"No signed .qeapp on microSD",installedTab?"Switch to Inbox with Options":"Download via Qeafbrowser");}
  else for(int row=0;row<SymbianUI::LIST_VISIBLE;row++)paintRow(ctx,offset+row,offset+row==index);
@@ -2152,8 +2183,9 @@ void AppInstallerApp::draw(AppContext &ctx){
    d.fillRect(3,283,230,14,colors.bg);d.setTextFont(1);d.setTextColor(colors.dim,colors.bg);
    d.setCursor(5,286);d.print(feedback.substring(0,32));
  }
- ctx.ui.softkeys("Options","Details","Back");
- drawPopup(ctx,popup,INSTALLER_OPTS,INSTALLER_OPT_COUNT);
+ ctx.ui.softkeys("Options",installedTab?"Open":"Details","Back");
+ drawPopup(ctx,popup,installerOptions(installedTab,details,verified,installedMatch,willUpdate),
+           installerOptionCount(installedTab));
 }
 
 ScreenId AppInstallerApp::handle(AppContext &ctx,const KeyEvent &e){
@@ -2218,7 +2250,17 @@ ScreenId AppInstallerApp::handle(AppContext &ctx,const KeyEvent &e){
    if(e.key==Key::Start||e.key==Key::Select){
      int choice=popup.index;popup.close();
      if(choice==0){selectedPath="";openDetails(ctx);}
-     if(choice==1){if(!details){selectedPath="";openDetails(ctx);}if(verified&&(installedTab||installAllowed)){confirm=true;confirmData=false;confirmChoice=1;}}
+     if(choice==1){
+       if(!details){selectedPath="";openDetails(ctx);}
+       if(verified && (installedTab || (installedMatch && !willUpdate))){
+         // The installed catalog is reverified by PackageApp before launch.
+         ctx.pendingPackageId=selectedMeta.id;
+         return ScreenId::PackageApp;
+       }
+       if(verified && installAllowed){
+         confirm=true;confirmData=false;confirmChoice=1;
+       }
+     }
      if(choice==2){installedTab=!installedTab;selectedPath="";reload(ctx,false);}
      if(choice==3){selectedPath="";reload(ctx);}
      if(choice==4)return ScreenId::Applications;
@@ -2234,28 +2276,41 @@ ScreenId AppInstallerApp::handle(AppContext &ctx,const KeyEvent &e){
          if(verified){confirm=true;confirmData=true;confirmChoice=1;}
        }
      }
+     if(choice==7 && installedTab){
+       if(!details){selectedPath="";openDetails(ctx);}
+       if(verified){confirm=true;confirmData=false;confirmChoice=1;}
+     }
      draw(ctx);return ScreenId::AppInstaller;
    }
-   popupNav(popup,e,INSTALLER_OPT_COUNT);draw(ctx);return ScreenId::AppInstaller;
+   popupNav(popup,e,installerOptionCount(installedTab));draw(ctx);return ScreenId::AppInstaller;
  }
  if(details){
    if(e.key==Key::A||e.key==Key::B){details=false;selectedPath="";draw(ctx);return ScreenId::AppInstaller;}
-   if(e.key==Key::Option){popup.show();drawPopup(ctx,popup,INSTALLER_OPTS,INSTALLER_OPT_COUNT);return ScreenId::AppInstaller;}
+   if(e.key==Key::Option){popup.show();drawPopup(ctx,popup,installerOptions(installedTab,details,verified,installedMatch,willUpdate),
+                      installerOptionCount(installedTab));return ScreenId::AppInstaller;}
    if(e.key==Key::Start||e.key==Key::Select){
-     if(verified&&installedTab){ctx.pendingPackageId=selectedMeta.id;return ScreenId::PackageApp;}
+     if(verified&&(installedTab||(installedMatch&&!willUpdate))){
+       ctx.pendingPackageId=selectedMeta.id;return ScreenId::PackageApp;
+     }
      if(verified&&installAllowed){confirm=true;confirmData=false;confirmChoice=1;draw(ctx);}
      return ScreenId::AppInstaller;
    }
    return ScreenId::AppInstaller;
  }
  if(e.key==Key::A||e.key==Key::B)return returnTo;
- if(e.key==Key::Option){popup.show();drawPopup(ctx,popup,INSTALLER_OPTS,INSTALLER_OPT_COUNT);return ScreenId::AppInstaller;}
+ if(e.key==Key::Option){popup.show();
+   drawPopup(ctx,popup,installerOptions(installedTab,details,verified,installedMatch,willUpdate),
+             installerOptionCount(installedTab));return ScreenId::AppInstaller;}
  if((e.key==Key::Up&&index>0)||(e.key==Key::Down&&index<count-1)){
    int old=index,oldOffset=offset;index+=e.key==Key::Up?-1:1;
    if(index<offset)--offset;if(index>=offset+SymbianUI::LIST_VISIBLE)++offset;
    if(offset!=oldOffset)draw(ctx);
    else{paintRow(ctx,old,false);paintRow(ctx,index,true);ctx.ui.scrollbar(count,SymbianUI::LIST_VISIBLE,offset);}
- }else if((e.key==Key::Start||e.key==Key::Select)&&count){selectedPath="";openDetails(ctx);draw(ctx);}
+ }else if((e.key==Key::Start||e.key==Key::Select)&&count){
+   selectedPath="";openDetails(ctx);
+   if(installedTab && verified){ctx.pendingPackageId=selectedMeta.id;return ScreenId::PackageApp;}
+   draw(ctx);
+ }
  return ScreenId::AppInstaller;
 }
 

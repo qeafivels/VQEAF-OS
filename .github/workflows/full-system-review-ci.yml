@@ -51,10 +51,15 @@ jobs:
         run: python tools/provision_lua_beta_key.py --private "${{ runner.temp }}/vqeaf-full-review-CI-only.pem"
       - name: Build experimental Lua OS without distributing CI-signing key
         run: pio run -e vqeaf_lua_beta
+      - name: Export production firmware from hidden PlatformIO output
+        run: |
+          mkdir -p ci_output
+          cp .pio/build/vqeaf_os/firmware.bin ci_output/VQEAF_OS_v251_default.bin
+          test -s ci_output/VQEAF_OS_v251_default.bin
       - name: Upload production firmware (experimental CI beta excluded)
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: VQEAF-v251-production-default-full-system-reviewed
-          path: .pio/build/vqeaf_os/firmware.bin
+          path: ci_output/VQEAF_OS_v251_default.bin
           if-no-files-found: error

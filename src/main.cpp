@@ -21,6 +21,14 @@
 #include "services/StorageService.h"
 #include "services/MusicService.h"
 #include "services/NotificationService.h"
+#include "services/UsbLinkMonitor.h"
+#if defined(ARDUINO_ARCH_ESP32) && defined(ARDUINO_USB_MODE) && ARDUINO_USB_MODE && \
+    defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT
+  #include <HWCDC.h>
+  #define VQEAF_HAS_NATIVE_USB_HOST_DETECTION 1
+#else
+  #define VQEAF_HAS_NATIVE_USB_HOST_DETECTION 0
+#endif
 #include "services/SystemService.h"
 #include "services/WiFiProfileStore.h"
 #include "services/ShellService.h"
@@ -119,6 +127,8 @@ static StorageService storage;
 static MusicService music;
 static TextKeyboard keyboard;
 static NotificationService notifications;
+static UsbLinkMonitor usbLinkMonitor;
+static uint32_t lastUsbPollAt=0;
 static SystemService systemService;
 static WiFiProfileStore wifiProfiles;
 static WiFiConnectionService wifiConnection;
@@ -684,6 +694,7 @@ void setup() {
 
   bool sdOk = storage.begin();
   if (sdOk) {
+    notifications.push("microSD detected", "Memory card ready");
     storage.ensureSystemLayout();
     Serial.println("SD layout: /System/{Cache,Themes,Apps,Downloads,Logs,Temp} + /Media + /Documents");
   }
@@ -805,6 +816,23 @@ void loop() {
   reportUiPerformanceIfDue();
 #endif
   diagPoll();
+#if VQEAF_HAS_NATIVE_USB_HOST_DETECTION
+  // Native USB Serial/JTAG host/enumeration presence. This cannot detect
+  // charger-only Type-C insertion or a disconnect that cuts all device power.
+  // Never change UART routing, USB pins, or emit a notice on one noisy sample.
+  if ((uint32_t)(millis()-lastUsbPollAt)>=100U) {
+    const uint32_t now=millis();
+    lastUsbPollAt=now;
+    const UsbLinkMonitor::Event usbEvent=usbLinkMonitor.sample(HWCDC::isPlugged(),now);
+    if(usbEvent==UsbLinkMonitor::Event::HostConnected) {
+      notifications.push("USB connected","Computer connected via Type-C");
+      Serial.println("[VQEAF][USB] host=CONNECTED");
+    } else if(usbEvent==UsbLinkMonitor::Event::HostDisconnected) {
+      notifications.push("USB disconnected","Type-C data connection lost");
+      Serial.println("[VQEAF][USB] host=DISCONNECTED");
+    }
+  }
+#endif
   if (!systemService.safeMode()) {
     music.update();
     musicApp.tick(appCtx, screen == ScreenId::Music && !osBackConfirm.active());

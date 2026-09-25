@@ -7,6 +7,8 @@ on:
       - 'tools/test_legacy_merge.py'
       - 'tools/legacy_host/**'
       - 'tools/test_vqeaf_full_soak.py'
+      - 'tools/test_v251_perf_parser.py'
+      - 'tools/measure_v251_serial.py'
       - 'themes/**'
       - 'sd/System/Themes/**'
       - 'docs/LEGACY_E524546_MERGE_VN.md'
@@ -31,6 +33,10 @@ jobs:
         run: python tools/run_full_system_review.py
       - name: 20k state transitions plus 240 actual C++ framebuffer renders and 12 screenshots
         run: python tools/test_vqeaf_full_soak.py
+      - name: Host diagnostic compile plus real-device serial parser self-test
+        run: |
+          python tools/test_perf_diag_host.py
+          python tools/test_v251_perf_parser.py
       - name: Production ESP32-S3 N16R8 firmware build
         run: pio run -e vqeaf_os
       - name: Export exact stock firmware before compiling beta
@@ -38,6 +44,11 @@ jobs:
           mkdir -p ci_output
           cp .pio/build/vqeaf_os/firmware.bin ci_output/VQEAF_OS_legacy_features_stock.bin
           test -s ci_output/VQEAF_OS_legacy_features_stock.bin
+      - name: Build ESP32-S3 CPU MHz/FPS diagnostic firmware (instrumented)
+        run: |
+          pio run -e vqeaf_perf_diag
+          cp .pio/build/vqeaf_perf_diag/firmware.bin ci_output/VQEAF_OS_legacy_features_perf_diag.bin
+          test -s ci_output/VQEAF_OS_legacy_features_perf_diag.bin
       - name: Verify Lua beta host runtime and QEAPP/2 trust policy
         run: |
           python tools/bootstrap_lua.py --firmware-root .
@@ -60,4 +71,5 @@ jobs:
             preview/vqeaf_large_statusbar_comparison.png
             build_reports/system_full/
             ci_output/VQEAF_OS_legacy_features_stock.bin
+            ci_output/VQEAF_OS_legacy_features_perf_diag.bin
           if-no-files-found: warn

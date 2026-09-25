@@ -166,9 +166,11 @@ void SymbianUI::drawStatusWifi(int x, int y, uint16_t c) {
   // Feature-phone style WiFi bars. The caller clears the complete status slot
   // before redraw, so a weaker RSSI never leaves stale taller bars behind.
   const uint8_t bars = statusWifiBars();
-  const int heights[4] = {2,4,6,8};
+  // Four 3px-wide bars reach 16px high; remain inside an 18x16 slot.
+  // No image buffers: just four short opaque fills.
+  const int heights[4] = {6,9,12,16};
   for (int i=0;i<4;++i) {
-    if (i < bars) tft.fillRect(x + i*3, y + 9 - heights[i], 2, heights[i], c);
+    if (i < bars) tft.fillRect(x + i*4, y + 16 - heights[i], 3, heights[i], c);
   }
 }
 
@@ -186,8 +188,10 @@ void SymbianUI::drawStatusSd(int x, int y, uint16_t c) {
 }
 
 void SymbianUI::drawStatusBattery(int x, int y, uint16_t c) {
-  tft.drawRect(x, y + 1, 9, 7, c);
-  tft.fillRect(x + 9, y + 3, 2, 3, c);
+  // 18x16 icon slot. The hollow 16x14 outline intentionally avoids
+  // implying a measured battery percentage (no ADC in the board BOM).
+  tft.drawRect(x, y + 1, 16, 14, c);
+  tft.fillRect(x + 16, y + 5, 2, 5, c);
   // No battery ADC in the confirmed BOM: outline only, never fake charge bars.
 }
 
@@ -200,13 +204,13 @@ void SymbianUI::chrome(const String &title, bool wifi, bool ble, bool sd, bool h
   const uint16_t bar = colors.chrome;
   const uint16_t ink = colors.chromeText;
 
-  // 240px titlebar: title | centered clock | compact WiFi+battery group.
-  // The two status glyphs are deliberately close together at the far right.
+  // 240px titlebar: title | centered clock | two enlarged status glyphs.
+  // Geometry asserts in UiLayoutGeometry keep both glyphs inside the 27px bar.
   const int centerX = STATUS_ZONE_W;
   const int rightX = STATUS_ZONE_W * 2;
-  const int iconY = 8;
-  const int batteryX = Board::SCREEN_W - STATUS_RIGHT_PAD - STATUS_ICON_W;
-  const int wifiX = batteryX - STATUS_ICON_GAP - STATUS_ICON_W;
+  const int iconY = VqeafLayout::STATUS_ICON_Y;
+  const int batteryX = VqeafLayout::STATUS_BATTERY_X;
+  const int wifiX = VqeafLayout::STATUS_WIFI_X;
 
   if (sameShell) {
     if (tm != chromeClock) {
@@ -220,7 +224,7 @@ void SymbianUI::chrome(const String &title, bool wifi, bool ble, bool sd, bool h
     if (wifiBars != chromeWifiBars) {
       tft.fillRect(rightX, 0, STATUS_ZONE_W, TITLEBAR_H - 2, bar);
       if (wifiBars) drawStatusWifi(wifiX, iconY, ink);
-      drawStatusBattery(batteryX, iconY - 1, ink);
+      drawStatusBattery(batteryX, iconY, ink);
       chromeWifiBars = wifiBars;
     }
     chromeWifi = wifi;
@@ -257,10 +261,10 @@ void SymbianUI::chrome(const String &title, bool wifi, bool ble, bool sd, bool h
   tft.setCursor((Board::SCREEN_W - tw) / 2, 9);
   tft.print(tm);
 
-  // Right zone: two equal 40px slots. This board has no cellular modem/SIM.
+  // Right zone: two enlarged 18px slots. This board has no cellular modem/SIM.
   // status area is intentionally WiFi + battery only.
   if (wifiBars) drawStatusWifi(wifiX, iconY, ink);
-  drawStatusBattery(batteryX, iconY - 1, ink);
+  drawStatusBattery(batteryX, iconY, ink);
 
   chromeValid = true;
   chromeWifi = wifi; chromeBle = false; chromeSd = false; chromeHour12 = hour12;

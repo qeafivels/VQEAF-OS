@@ -96,7 +96,8 @@ def main():
     src=(ROOT/'src/main.cpp').read_text()
     assert 'ui.idleShortcutDelta(old,idleShortcut)' in src
     assert 'else enterScreen(ScreenId::Idle, false);' in src
-    assert 'VQEAF OS v2.' in src
+    assert '#include "core/BuildVersion.h"' in src
+    assert 'VQEAF_OS_VERSION_TEXT "VQEAF OS v2.5.1"' in (ROOT/'src/core/BuildVersion.h').read_text()
     assert all((ROOT/'src/core'/file).exists() for file in
                ['UiTypography.h','UiIconCatalog.h','UiVietnameseFont.h','UiLayoutGeometry.h'])
     assert not list(ROOT.rglob('*.ttf')) and not list(ROOT.rglob('*.otf'))

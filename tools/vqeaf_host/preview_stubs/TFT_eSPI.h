@@ -4,7 +4,12 @@
 #include <fstream>
 #include <cassert>
 class TFT_eSPI {
+  bool swapBytes=false;
 public:
+  bool getSwapBytes() const { return swapBytes; }
+  void setSwapBytes(bool state) { swapBytes=state; }
+  void startWrite() {}
+  void endWrite() {}
   std::vector<uint16_t> fb;
   uint16_t fg=0xffff, bg=0;
   int cursorX=0,cursorY=0,textfont=1,fullFills=0;

@@ -162,6 +162,11 @@ void TextKeyboard::draw(SymbianUI &ui,bool wifi,bool ble,bool sd,bool hour12) {
     }
   };
   if(full){
+    // QWERTY and symbol rows have different widths and alignment.
+    // Erase prior key outlines only when the actual LAYOUT changes; otherwise
+    // old key pixels survive when a 10-cell row becomes a 9-cell row.
+    // Ordinary key movement still repaints only previous/current focus.
+    if(!firstDraw)tft.fillRect(0,76,Board::SCREEN_W,184,colors.bg);
     for(int r=0;r<LETTER_ROWS;++r)
       for(int k=0;k<colsFor(r);++k)paintKey(r,k);
     for(int k=0;k<SPECIAL_COUNT;++k)paintKey(SPECIAL_ROW,k);

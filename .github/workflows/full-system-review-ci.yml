@@ -1,0 +1,73 @@
+name: VQEAF complete OS regression and authentic host screenshots
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/system-vkeyboard-usb-sd-notices]
+    paths:
+      - 'src/**'
+      - 'tools/run_full_system_review.py'
+      - 'tools/test_*.py'
+      - 'tools/verify_*.py'
+      - 'tools/vqeaf_host/**'
+      - 'tools/host_stubs/**'
+      - '.github/workflows/full-system-review-ci.yml'
+permissions:
+  contents: read
+jobs:
+  full-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install host dependencies and ESP32 build system
+        run: python -m pip install pillow cryptography platformio
+      - name: Run full compiled-host regression and capture real C++ UI framebuffer
+        run: python tools/run_full_system_review.py
+      - name: Upload host capture + complete check logs even if a test fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: VQEAF-v251-full-system-HOST-CAPTURE-not-physical-LCD
+          path: |
+            preview/vqeaf_full_system_host_capture.png
+            preview/v23_home_host_raster.png
+            preview/v23_menu_host_raster.png
+            preview/browser_keyboard.png
+            preview/browser_keyboard_focus.png
+            preview/wifi_keyboard_masked.png
+            preview/system_notifications.png
+            preview/vqeaf_large_statusbar_comparison.png
+            preview/statusbar_large_green.png
+            preview/statusbar_large_night.png
+            preview/statusbar_low_green.png
+            preview/statusbar_low_night.png
+            preview/installer_revisit_open.png
+            preview/installed_apps_open_menu.png
+            build_reports/system_full/
+          if-no-files-found: warn
+      - name: Build default complete OS for ESP32-S3 N16R8
+        run: pio run -e vqeaf_os
+      - name: Export production firmware from hidden PlatformIO output
+        run: |
+          mkdir -p ci_output
+          cp .pio/build/vqeaf_os/firmware.bin ci_output/VQEAF_OS_v251_default.bin
+          test -s ci_output/VQEAF_OS_v251_default.bin
+      - name: Verify real Lua VM and signed beta compatibility
+        run: |
+          python tools/bootstrap_lua.py --firmware-root .
+          python tools/test_lua_beta_vm.py
+          python tools/test_lua_beta_compat.py
+      - name: Provision throwaway key exclusively for compiling the beta
+        run: python tools/provision_lua_beta_key.py --private "${{ runner.temp }}/vqeaf-full-review-CI-only.pem"
+      - name: Build experimental Lua OS without distributing CI-signing key
+        run: pio run -e vqeaf_lua_beta
+      - name: Upload production firmware (experimental CI beta excluded)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: VQEAF-v251-production-default-full-system-reviewed
+          path: ci_output/VQEAF_OS_v251_default.bin
+          if-no-files-found: error

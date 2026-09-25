@@ -23,18 +23,21 @@ def parse_args():
     a.add_argument('--id', required=True)
     a.add_argument('--name', required=True)
     a.add_argument('--version', required=True)
-    a.add_argument('--type', choices=('web', 'text'), required=True)
+    a.add_argument('--type', choices=('web', 'text', 'lua'), required=True)
     a.add_argument('--url')
     a.add_argument('--text', type=Path)
+    a.add_argument('--lua', type=Path, help='main.lua source (experimental vqeaf_lua_beta only)')
+    a.add_argument('--enable-lua-experimental',action='store_true')
     a.add_argument('--icon', type=Path)
     a.add_argument('--sign-key',type=Path,required=True,help='private publisher PEM key, NEVER distribute')
-    a.add_argument('--key-id',type=lambda t:int(t,0),default=0x31534351)
+    a.add_argument('--key-id',type=lambda t:int(t,0),default=None)
     a.add_argument('-o', '--output', type=Path, required=True)
     return a.parse_args()
 
 
 def main():
     a = parse_args()
+    if a.key_id is None:a.key_id=0x544c5541 if a.type=='lua' else 0x31534351
     if not re.fullmatch(r'[a-z0-9_-]{1,24}', a.id):
         raise SystemExit('Invalid id: lowercase a-z, 0-9, underscore, dash; <=24')
     if not a.name.isascii() or not 1 <= len(a.name) <= 40 or any(ord(c)<32 or ord(c)>126 for c in a.name):
@@ -44,13 +47,22 @@ def main():
     if a.type == 'web':
         if not a.url or not a.url.startswith('https://') or ' ' in a.url or len(a.url)>192:
             raise SystemExit('HTTPS --url required, <=192 bytes')
-        if a.text:
-            raise SystemExit('Web app cannot embed text payload')
+        if a.text or a.lua:
+            raise SystemExit('Web app cannot embed payload')
         manifest = f'id={a.id}\nname={a.name}\nversion={a.version}\ntype=web\nentry={a.url}\n'.encode('ascii')
         payload = b''
+    elif a.type == 'lua':
+        if not a.enable_lua_experimental or not a.lua or a.url or a.text:
+            raise SystemExit('Experimental Lua requires --lua, --enable-lua-experimental and no --text/--url')
+        payload=a.lua.read_bytes()
+        if not 0 < len(payload) <= 64*1024 or b'\x00' in payload:
+            raise SystemExit('Lua source must be UTF-8 text and <=64KiB')
+        try:payload.decode('utf-8')
+        except UnicodeDecodeError as exc:raise SystemExit('Lua source must be UTF-8') from exc
+        manifest=f'id={a.id}\nname={a.name}\nversion={a.version}\ntype=lua\n'.encode('ascii')
     else:
-        if not a.text or a.url:
-            raise SystemExit('Text app requires --text and no --url')
+        if not a.text or a.url or a.lua:
+            raise SystemExit('Text app requires --text and no --url/--lua')
         payload = a.text.read_bytes()
         if not 0<len(payload)<=MAX_PAYLOAD:
             raise SystemExit('Text payload must be 1..262144 bytes')

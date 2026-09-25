@@ -109,6 +109,9 @@ bool SystemService::isTaskScreen(ScreenId s) {
     case ScreenId::Calculator:
     case ScreenId::Stopwatch:
     case ScreenId::Snake:
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+    case ScreenId::LuaApp:
+#endif
       return true;
     default:
       return false;
@@ -200,6 +203,9 @@ const char *SystemService::screenName(ScreenId s) {
     case ScreenId::Calculator: return "Calculator";
     case ScreenId::Stopwatch: return "Stopwatch";
     case ScreenId::Snake: return "Pixel Snake";
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+    case ScreenId::LuaApp: return "Lua application";
+#endif
     default: return "Menu";
   }
 }
@@ -228,6 +234,9 @@ const char *SystemService::screenIcon(ScreenId s) {
     case ScreenId::Calculator: return "Calc";
     case ScreenId::Stopwatch: return "Clk";
     case ScreenId::Snake: return "Game";
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+    case ScreenId::LuaApp: return "App";
+#endif
     default: return "App";
   }
 }

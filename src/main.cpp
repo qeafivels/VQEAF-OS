@@ -34,6 +34,27 @@
 #include "apps/Apps.h"
 #include "apps/PixelSnakeApp.h"
 
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+#include "lua/QeLuaRuntime.h"
+static QeLuaRuntime luaVm;
+static uint32_t luaPreviousAt=0, luaNextFrameAt=0;
+static char luaRunningName[41]="Lua application";
+// All beta drawing is clipped by VM to the 240x270 application viewport.
+// Existing system chrome/footer and original VQEAF renderer stay unchanged.
+static void luaRect(void *u,int x,int y,int w,int h,uint16_t color) {
+  static_cast<TFT_eSPI*>(u)->fillRect(x,y+29,w,h,color);
+}
+static void luaText(void *u,int x,int y,const char *value,uint16_t color) {
+  auto *t=static_cast<TFT_eSPI*>(u);
+  t->setTextColor(color);
+  t->setTextFont(1);
+  t->setTextSize(1);
+  t->setCursor(x,y+29);
+  t->print(value);
+}
+static uint32_t luaMillis(void*) {return millis();}
+#endif
+
 static TFT_eSPI tft;
 static VqeafUI ui(tft); // compatibility adapter over the existing UI implementation
 static InputManager input;
@@ -187,6 +208,9 @@ static void enterScreen(ScreenId s, bool animate = true, bool resume = false) {
   const uint32_t navStartUs=micros();
 #endif
   ScreenId from = screen;
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+  if (from == ScreenId::LuaApp && s != ScreenId::LuaApp) luaVm.stop();
+#endif
   // Forced navigation (card removal/auto-lock/etc.) must invalidate a pending
   // confirmation so it can never confirm a stale app after the new screen loads.
   if (s != from && osBackConfirm.active()) osBackConfirm.cancel();
@@ -218,6 +242,53 @@ static void enterScreen(ScreenId s, bool animate = true, bool resume = false) {
         }
         // Browser and Text Viewer normally consume this flag. Snake does not.
         appCtx.pendingPackageLaunch = false;
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+      } else if (!strcmp(meta.type, "lua")) {
+        appCtx.pendingPackageLaunch = false;
+        if (systemService.safeMode() || !storage.mounted()) {
+          launchFeedback="Lua unavailable: Safe Mode or no microSD";
+          s=ScreenId::Applications;
+        } else {
+          // get() just verified the signed installed receipt and all sections.
+          // Check the copied source against the same receipt hash AGAIN before execution.
+          const String base=appInstaller.installedPath(meta.id);
+          File receipt=storage.fs().open(base+"/receipt.bin",FILE_READ);
+          uint8_t signedHeader[Qeapp::HEADER_BYTES];
+          const bool hasReceipt=receipt && !receipt.isDirectory() &&
+              receipt.size()==Qeapp::HEADER_BYTES+Qeapp::SIGNATURE_BYTES &&
+              receipt.read(signedHeader,sizeof signedHeader)==(int)sizeof signedHeader &&
+              memcmp(signedHeader,"QEAPP2\r\n",8)==0;
+          if(receipt)receipt.close();
+          File source=storage.fs().open(base+"/payload.txt",FILE_READ);
+          const size_t size=source && !source.isDirectory()?size_t(source.size()):0;
+          char *code=(hasReceipt && size>0 && size<=QeLuaRuntime::kMaxSource) ?
+              static_cast<char*>(heap_caps_malloc(size+1,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)) : nullptr;
+          bool valid=source && code &&
+              source.read(reinterpret_cast<uint8_t*>(code),size)==(int)size;
+          if(source)source.close();
+          if(valid) {
+            Qeapp::Sha256 sourceHash;uint8_t digest[32];
+            sourceHash.update(reinterpret_cast<const uint8_t*>(code),size);
+            sourceHash.finish(digest);
+            valid=Qeapp::equalHash(digest,signedHeader+84) && !memchr(code,0,size);
+            if(valid)code[size]=0;
+          }
+          QeLuaRuntime::Draw draw={luaRect,luaText,luaMillis,&tft};
+          const bool started=valid && luaVm.start(code,size,draw,192*1024);
+          if(code)heap_caps_free(code);
+          if(!started) {
+            launchFeedback=valid?luaVm.error():"Lua payload invalid, changed or out of PSRAM";
+            Serial.printf("[VQEAF][LUA] launch rejected id=%s reason=%s\n",meta.id,launchFeedback.c_str());
+            notifications.push("Lua app error",launchFeedback);
+            s=ScreenId::Applications;
+          } else {
+            snprintf(luaRunningName,sizeof luaRunningName,"%s",meta.name);
+            luaPreviousAt=luaNextFrameAt=millis();
+            Serial.printf("[VQEAF][LUA] started id=%s bytes=%lu\n",meta.id,(unsigned long)size);
+            s=ScreenId::LuaApp;
+          }
+        }
+#endif
       } else if (!strcmp(meta.type, "web")) {
         appCtx.pendingBrowserUrl = meta.entry;
         s = ScreenId::Browser;
@@ -293,6 +364,17 @@ static void enterScreen(ScreenId s, bool animate = true, bool resume = false) {
       if (!resume) browserApp.enter(appCtx); browserApp.draw(appCtx); break;
     case ScreenId::Snake:
       pixelSnakeApp.draw(appCtx); break;
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+    case ScreenId::LuaApp:
+      ui.chrome(luaRunningName,wifiConnected(),false,false,settings.data().hour12);
+      ui.softkeys("","","Back");
+      if (!luaVm.render()) {
+        launchFeedback=luaVm.error();
+        notifications.push("Lua runtime",launchFeedback);
+        enterScreen(ScreenId::Applications,false);
+      }
+      break;
+#endif
     case ScreenId::Shell:
       if (!resume) shellApp.enter(appCtx); shellApp.draw(appCtx); break;
     case ScreenId::Settings:
@@ -661,7 +743,11 @@ void loop() {
     if (screen == ScreenId::Explorer) explorer.draw(appCtx);
     if (screen == ScreenId::Files || screen == ScreenId::Gallery ||
         screen == ScreenId::Themes || screen == ScreenId::TextViewer ||
-        screen == ScreenId::AppInstaller || screen == ScreenId::Snake) enterScreen(ScreenId::Idle, false);
+        screen == ScreenId::AppInstaller || screen == ScreenId::Snake
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+        || screen == ScreenId::LuaApp
+#endif
+        ) enterScreen(ScreenId::Idle, false);
   } else if (cardEvent == StorageService::CardEvent::Mounted) {
     Serial.printf("[S3DIAG][SD] event=MOUNTED errors=%u uptime_ms=%lu\n", storage.ioErrors(), (unsigned long)millis());
     notifications.push("microSD mounted", "Filesystem ready again");
@@ -676,6 +762,21 @@ void loop() {
   }
   stopwatchApp.tick(appCtx, screen == ScreenId::Stopwatch && !osBackConfirm.active());
   if (screen == ScreenId::Snake && !osBackConfirm.active()) pixelSnakeApp.tick(appCtx);
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+  // Never repaint or process scripted callbacks behind the OS Back modal.
+  if (screen == ScreenId::LuaApp && !osBackConfirm.active() &&
+      int32_t(millis()-luaNextFrameAt)>=0) {
+    uint32_t now=millis();
+    const float dt=float(now-luaPreviousAt)/1000.0f;
+    luaPreviousAt=now;luaNextFrameAt=now+50; // beta: cap to ~20 FPS
+    if(!luaVm.update(dt) || !luaVm.render()) {
+      String reason=luaVm.error();
+      Serial.printf("[VQEAF][LUA] callback rejected reason=%s\n",reason.c_str());
+      notifications.push("Lua runtime",reason);
+      enterScreen(ScreenId::Applications,false);
+    }
+  }
+#endif
   galleryApp.tick(appCtx, screen == ScreenId::Gallery && !osBackConfirm.active());
   wifiApp.tick(appCtx, screen == ScreenId::WiFi);
   systemService.update(notifications);
@@ -854,6 +955,20 @@ void loop() {
       next = browserApp.handle(appCtx,e); break;
     case ScreenId::Snake:
       next = pixelSnakeApp.handle(appCtx,e); break;
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+    case ScreenId::LuaApp:
+      if(e.pressed && !e.longPress && e.key==Key::A) next=ScreenId::Applications;
+      else if(!e.longPress && !osBackConfirm.active()) {
+        const char* name=e.key==Key::Up?"up":e.key==Key::Down?"down":
+          e.key==Key::Left?"left":e.key==Key::Right?"right":
+          e.key==Key::Start?"start":e.key==Key::Option?"option":nullptr;
+        if(name && !luaVm.key(name,e.pressed)) {
+          notifications.push("Lua runtime",luaVm.error());
+          next=ScreenId::Applications;
+        }
+      }
+      break;
+#endif
     case ScreenId::Shell:
       next = shellApp.handle(appCtx,e); break;
     case ScreenId::Settings:

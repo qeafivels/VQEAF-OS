@@ -61,6 +61,9 @@ bool parseManifest(const char *src,size_t n,Meta &out,const char *&error){
  if(!versionDigit){error="Invalid version syntax";return false;}
  if(!strcmp(out.type,"web")){if(!(fields&16)||strncmp(out.entry,"https://",8)){error="Web apps require HTTPS entry";return false;} // reject control characters and shell-style pseudo URLs
    const char *host=out.entry+8;if(!*host||*host=='/'||strchr(out.entry,' ')){error="Invalid HTTPS URL";return false;}}
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+ else if(!strcmp(out.type,"lua")){if(fields&16){error="Lua app cannot specify entry";return false;}}
+#endif
  else if(strcmp(out.type,"text")!=0||(fields&16)){error="Unsupported app type or text entry";return false;}
  return true;
 }

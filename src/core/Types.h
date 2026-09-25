@@ -31,7 +31,8 @@ enum class ScreenId : uint8_t {
   About,
   Calculator,
   Stopwatch,
-  Snake // optional trusted built-in game, activated by signed snake_pixel text package
+  Snake, // optional trusted built-in game, activated by signed snake_pixel text package
+  LuaApp // beta-only, after signed package install and per-app verifier
 };
 
 enum class Key : uint8_t {

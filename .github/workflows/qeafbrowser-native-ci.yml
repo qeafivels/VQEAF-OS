@@ -1,0 +1,52 @@
+name: VQEAF native Qeafbrowser ESP32-S3
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/qeafbrowser-native-v251]
+    paths:
+      - 'src/**'
+      - 'platformio.ini'
+      - 'tools/test_qeafbrowser_os.py'
+      - 'tools/test_lua_frame_present.py'
+      - 'tools/test_lua_transition_noblank.py'
+      - '.github/workflows/qeafbrowser-native-ci.yml'
+permissions:
+  contents: read
+jobs:
+  browser-stock-lua:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install host dependencies and PlatformIO
+        run: python -m pip install cryptography pillow platformio
+      - name: Test browser routes, bookmark durability and OS integration
+        run: python tools/test_qeafbrowser_os.py
+      - name: Regression for Back, URL, signature and previous no-blank Lua patch
+        run: |
+          python tools/test_lua_transition_noblank.py
+          python tools/test_lua_frame_present.py
+          python tools/test_backguard_v251.py
+          python tools/test_v15_signature.py
+      - name: Build stock ESP32-S3 N16R8 firmware
+        run: pio run -e vqeaf_os
+      - name: Fetch official verified Lua 5.4.8 and run VM regression
+        run: |
+          python tools/bootstrap_lua.py --firmware-root .
+          python tools/test_lua_beta_vm.py
+      - name: Provision throwaway beta key for CI only
+        run: python tools/provision_lua_beta_key.py --private "${{ runner.temp }}/qeapp-browser-ci-ephemeral.pem"
+      - name: Build experimental Lua beta firmware (do not flash CI key)
+        run: pio run -e vqeaf_lua_beta
+      - name: Upload CI-only build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qeafbrowser-native-CI-ONLY-ephemeral-beta-key
+          path: |
+            .pio/build/vqeaf_os/firmware.bin
+            .pio/build/vqeaf_lua_beta/firmware.bin
+          if-no-files-found: warn

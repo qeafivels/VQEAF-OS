@@ -27,7 +27,8 @@ public:
   BrowserService &operator=(const BrowserService &) = delete;
   static constexpr int MAX_LINES = 84;
   static constexpr int MAX_LINKS = 24;
-  static constexpr int HISTORY_MAX = 8;
+  static constexpr int HISTORY_MAX = 16;
+  static constexpr int BOOKMARK_MAX = 12;
 
   bool begin(StorageService *storage = nullptr);
   bool available() const { return poolsReady; }
@@ -35,6 +36,9 @@ public:
   bool reload();
   bool goBack();
   bool openLink(int index);
+  bool bookmarkCurrent();
+  int bookmarkCount() const { return bookmarkUsed; }
+  const char *bookmarkAt(int i) const { return bookmarks && i >= 0 && i < bookmarkUsed ? bookmarks[i] : ""; }
   bool download(const String &inputUrl, String &savedPath, String &error);
   bool pageFromCache() const { return cachedPage; }
 
@@ -59,6 +63,8 @@ private:
   BrowserLine *lines = nullptr;
   BrowserLink *links = nullptr;
   char (*history)[192] = nullptr;
+  char (*bookmarks)[192] = nullptr;
+  int bookmarkUsed = 0;
   bool poolsReady = false;
   StorageService *storage = nullptr;
   bool cachedPage = false;
@@ -73,6 +79,9 @@ private:
   int linkUsed = 0;
 
   bool fetchAndParse(const char *url, bool pushHistory);
+  bool renderInternal(const char *url, bool addHistory);
+  void loadBookmarks();
+  bool saveBookmarks();
   void resetPage();
   void parseHtml(const char *src, size_t len);
   int addLink(const char *href, const char *label);

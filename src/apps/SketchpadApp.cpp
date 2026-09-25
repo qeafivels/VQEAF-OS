@@ -1,4 +1,5 @@
 #include "SketchpadApp.h"
+#include "SketchpadRenderer.h"
 #include <esp_heap_caps.h>
 #include <stdlib.h>
 // Original implementation inspired by legacy E524546 Paint/Notes behavior.
@@ -67,29 +68,7 @@ bool SketchpadApp::importLegacy(AppContext &ctx){
   return true;
 }
 void SketchpadApp::paintCanvas(AppContext &ctx){
-  TFT_eSPI &d=ctx.ui.display();
-  d.fillRect(0,SymbianUI::CONTENT_TOP,240,
-             SymbianUI::SOFTKEY_TOP-SymbianUI::CONTENT_TOP,PAPER);
-  for(int y=58;y<279;y+=20)d.drawFastHLine(0,y,240,RULED);
-  d.drawFastVLine(23,49,230,MARGIN);
-  d.drawFastVLine(25,49,230,MARGIN);
-  for(int i=0;i<model_.count();++i){
-    const SketchpadModel::Stroke &s=model_.at(i);
-    const uint16_t ink=s.tool==SketchpadModel::Eraser?PAPER:
-                       s.tool==SketchpadModel::Pencil?GRAPHITE:INK;
-    d.drawLine(s.x0,s.y0,s.x1,s.y1,ink);
-  }
-  // A cursor frame distinct from the pen stroke; no overlay framebuffer.
-  d.drawRect(cx_-3,cy_-3,7,7,CURSOR);
-  const uint16_t text=INK;
-  d.setTextColor(text,PAPER);d.setTextFont(1);d.setTextSize(1);
-  d.setCursor(32,34);
-  d.print(String("P")+String(selected_+1)+" "+TOOLS[tool_]+"  "+model_.count()+"/"+SketchpadModel::MAX_STROKES);
-  d.setCursor(33,282);d.print("Dpad draw  OPT tool  B undo");
-  if(message_.length()){
-    d.setCursor(33,268);
-    d.print(message_.substring(0,32));
-  }
+  SketchpadRenderer::paint(ctx.ui.display(),model_,selected_,tool_,cx_,cy_,message_);
 }
 void SketchpadApp::draw(AppContext &ctx){
   ctx.ui.chrome("Sketchpad",WiFi.status()==WL_CONNECTED,false,

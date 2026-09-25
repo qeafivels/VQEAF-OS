@@ -21,7 +21,7 @@ checks={
  'WAV end drains DMA': 'finishDeadline=millis()+150UL' in svc,
  'bounded playlist no heap and nonrepeating shuffle': 'PlaylistNavigator playlist' in (r/'src/apps/Apps.h').read_text(),
  'music repeats Off/All/One': all(x in (r/'src/services/PlaylistNavigator.h').read_text() for x in ['Repeat::Off','Repeat::All','Repeat::One']),
- 'gallery slideshow tick': 'galleryApp.tick(appCtx, screen == ScreenId::Gallery)' in main,
+ 'gallery slideshow tick': 'galleryApp.tick(appCtx, screen == ScreenId::Gallery && !osBackConfirm.active())' in main,
  'gallery outside library path': 'if(!found&&ctx.storage.mounted())' in apps,
  'BLE strongest results': 'power>devs[weakest].rssi' in apps,
  'BLE details has return state': 'if (details)' in apps and 'details=false; draw(ctx)' in apps,

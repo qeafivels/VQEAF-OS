@@ -18,7 +18,7 @@ inline void paint(TFT_eSPI &d,const SketchpadModel &model,int selected,int tool,
   static const char *const toolNames[]={"Ink","Pencil","Eraser"};
   if(tool<0 || tool>2)tool=0;
   d.fillRect(0,VqeafLayout::CONTENT_TOP,240,
-             VqeafLayout::SOFTKEY_TOP-VqeafLayout::CONTENT_TOP,PAPER);
+             VqeafLayout::FOOTER_Y-VqeafLayout::CONTENT_TOP,PAPER);
   for(int y=58;y<279;y+=20)d.drawFastHLine(0,y,240,RULED);
   d.drawFastVLine(23,49,230,MARGIN);
   d.drawFastVLine(25,49,230,MARGIN);

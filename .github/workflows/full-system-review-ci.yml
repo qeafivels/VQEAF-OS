@@ -6,7 +6,7 @@ on:
     paths:
       - 'src/**'
       - 'tools/run_full_system_review.py'
-      - 'tools/vqeaf_host/test_system_raster.cpp'
+      - 'tools/vqeaf_host/**'
       - '.github/workflows/full-system-review-ci.yml'
 permissions:
   contents: read

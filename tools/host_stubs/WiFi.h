@@ -12,7 +12,8 @@ class WiFiClass { public:
  int status() const{return mockStatus;}
 #else
  int status() const{return 0;}
-#endif void mode(int){} int getMode()const{return WIFI_STA;} void setAutoReconnect(bool){} void setHostname(const char*){}
+#endif
+ void mode(int){} int getMode()const{return WIFI_STA;} void setAutoReconnect(bool){} void setHostname(const char*){}
  int scanNetworks(bool=false,bool=false){return 0;} int scanComplete(){return 0;} String SSID(int=0)const{return String("ssid");} int32_t RSSI(int=0)const{
 #ifdef VQEAF_HOST_WIFI_TEST
    return mockRssi;

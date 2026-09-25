@@ -1,0 +1,57 @@
+name: Merge legacy E524546 features into VQEAF-OS
+on:
+  push:
+    branches: [feat/legacy-e524546-sketchpad-integration]
+    paths:
+      - 'src/**'
+      - 'tools/test_legacy_merge.py'
+      - 'tools/legacy_host/**'
+      - 'themes/**'
+      - 'sd/System/Themes/**'
+      - 'docs/LEGACY_E524546_MERGE_VN.md'
+      - '.github/workflows/legacy-e524546-merge-ci.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  legacy-merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Provision host test and PlatformIO dependencies
+        run: python -m pip install pillow cryptography platformio
+      - name: Real native sketch model, legacy import, OS routing and theme
+        run: python tools/test_legacy_merge.py
+      - name: Full VQEAF-OS compiled host regression
+        run: python tools/run_full_system_review.py
+      - name: Production ESP32-S3 N16R8 firmware build
+        run: pio run -e vqeaf_os
+      - name: Export exact stock firmware before compiling beta
+        run: |
+          mkdir -p ci_output
+          cp .pio/build/vqeaf_os/firmware.bin ci_output/VQEAF_OS_legacy_features_stock.bin
+          test -s ci_output/VQEAF_OS_legacy_features_stock.bin
+      - name: Verify Lua beta host runtime and QEAPP/2 trust policy
+        run: |
+          python tools/bootstrap_lua.py --firmware-root .
+          python tools/test_lua_beta_vm.py
+          python tools/test_lua_beta_compat.py
+      - name: Provision throwaway Lua beta key for BUILD ONLY
+        run: python tools/provision_lua_beta_key.py --private "${{ runner.temp }}/vqeaf-legacy-CI-only.pem"
+      - name: Verify no Lua beta regression in ESP32-S3 firmware
+        run: pio run -e vqeaf_lua_beta
+      - name: Upload host images, results and production firmware
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: VQEAF-E524546-legacy-integration-host-and-build
+          path: |
+            preview/vqeaf_full_system_host_capture.png
+            preview/vqeaf_large_statusbar_comparison.png
+            build_reports/system_full/
+            ci_output/VQEAF_OS_legacy_features_stock.bin
+          if-no-files-found: warn

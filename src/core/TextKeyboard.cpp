@@ -27,6 +27,7 @@ void TextKeyboard::open(const String &cap,const String &initial,bool password) {
   if(text.length()>MAX_TEXT)text.remove(MAX_TEXT);
   masked=password;shown=true;done=cancel=false;
   upper=false;symbols=false;row=1;col=0;
+  firstDraw=true;lastUpper=false;lastSymbols=false;lastRow=-1;lastCol=-1;
   lastNumeric=Key::None;numericTap=0;numericAt=0;
 }
 bool TextKeyboard::insert(const char *s) {
@@ -107,9 +108,12 @@ void TextKeyboard::draw(SymbianUI &ui,bool wifi,bool ble,bool sd,bool hour12) {
   auto &tft=ui.display();
   const auto colors=ui.c();
   ui.chrome(caption,wifi,ble,sd,hour12);
-  // Repaint all keyboard pixels in-place. Never expose a clearContent()
-  // frame during focus changes; keep OS status and softkey panes intact.
-  tft.fillRect(0,29,Board::SCREEN_W,269,colors.bg);
+  const bool full=firstDraw || lastUpper!=upper || lastSymbols!=symbols;
+  if(firstDraw){
+    // Clear only ONCE on entering input mode. An ordinary D-pad/typing event
+    // repaints its own dirty cells instead of blanking the entire keyboard.
+    tft.fillRect(0,29,Board::SCREEN_W,269,colors.bg);
+  }
   String visible;
   if(masked){for(size_t i=0;i<text.length();++i)visible+='*';}
   else visible=text;
@@ -119,48 +123,64 @@ void TextKeyboard::draw(SymbianUI &ui,bool wifi,bool ble,bool sd,bool hour12) {
   tft.setTextSize(1);tft.setTextFont(1);
   tft.setTextColor(colors.text,colors.panel);
   tft.setCursor(10,47);tft.print(visible);
-  for(int r=0;r<LETTER_ROWS;++r) {
-    const char *chars=rowChars(r);
-    const int n=colsFor(r);
-    // 10 cells at 23 px pitch; rows 2/3 centered for QWERTY feel.
-    const int start=5+(10-n)*11;
-    const int y=81+r*28;
-    for(int i=0;i<n;++i){
-      const int x=start+i*23;
-      const bool selected=row==r&&col==i;
+
+  auto paintKey=[&](int r,int k) {
+    if(r<LETTER_ROWS){
+      const char *chars=rowChars(r);
+      const int n=colsFor(r);
+      if(k<0||k>=n)return;
+      const int x=5+(10-n)*11+k*23;
+      const int y=81+r*28;
+      const bool selected=row==r&&col==k;
       const uint16_t bg=selected?colors.selected:colors.panel;
       tft.fillRect(x,y,21,24,bg);
       tft.drawRect(x,y,21,24,selected?colors.border:colors.dim);
-      char glyph[2]={chars[i],0};
+      char glyph[2]={chars[k],0};
       tft.setTextColor(colors.text,bg);
       tft.setCursor(x+7,y+8);tft.print(glyph);
-    }
-  }
-  const int y=197;
-  const int widths[5]={42,34,65,38,43};
-  int x=5;
-  for(int i=0;i<SPECIAL_COUNT;++i){
-    const int w=widths[i];
-    const bool selected=row==SPECIAL_ROW&&col==i;
-    const uint16_t bg=selected?colors.selected:colors.panel;
-    tft.fillRect(x,y,w,26,bg);
-    tft.drawRect(x,y,w,26,selected?colors.border:colors.dim);
-    tft.setTextColor(colors.text,bg);tft.setCursor(x+3,y+9);tft.print(KB_ACTIONS[i]);
-    x+=w+1;
-  }
-  if(!masked) {
-    const char *const shortcuts[]={".com",".net",".org"};
-    for(int i=0;i<3;++i){
-      const int tx=24+i*72;
-      const bool selected=row==5&&col==i;
+    }else if(r==SPECIAL_ROW){
+      static const int widths[5]={42,34,65,38,43};
+      if(k<0||k>=SPECIAL_COUNT)return;
+      int x=5;for(int n=0;n<k;++n)x+=widths[n]+1;
+      const int y=197,w=widths[k];
+      const bool selected=row==r&&col==k;
       const uint16_t bg=selected?colors.selected:colors.panel;
-      tft.fillRect(tx,232,65,24,bg);
-      tft.drawRect(tx,232,65,24,selected?colors.border:colors.dim);
-      tft.setTextColor(colors.text,bg);tft.setCursor(tx+14,240);tft.print(shortcuts[i]);
+      tft.fillRect(x,y,w,26,bg);
+      tft.drawRect(x,y,w,26,selected?colors.border:colors.dim);
+      tft.setTextColor(colors.text,bg);
+      tft.setCursor(x+3,y+9);tft.print(KB_ACTIONS[k]);
+    }else if(r==5&&!masked){
+      static const char *const shortcuts[]={".com",".net",".org"};
+      if(k<0||k>=3)return;
+      const int x=24+k*72,y=232;
+      const bool selected=row==r&&col==k;
+      const uint16_t bg=selected?colors.selected:colors.panel;
+      tft.fillRect(x,y,65,24,bg);
+      tft.drawRect(x,y,65,24,selected?colors.border:colors.dim);
+      tft.setTextColor(colors.text,bg);
+      tft.setCursor(x+14,y+8);tft.print(shortcuts[k]);
     }
+  };
+  if(full){
+    for(int r=0;r<LETTER_ROWS;++r)
+      for(int k=0;k<colsFor(r);++k)paintKey(r,k);
+    for(int k=0;k<SPECIAL_COUNT;++k)paintKey(SPECIAL_ROW,k);
+    if(!masked)for(int k=0;k<3;++k)paintKey(5,k);
+    tft.setTextColor(colors.dim,colors.bg);
+    tft.setCursor(6,270);
+    tft.print("D-pad Move  OK Type  B Delete");
+  }else{
+    // Repaint previous focus with its regular color, then the new focus.
+    // Temporarily move logical focus only within paint; no input state changes.
+    const int newRow=row,newCol=col;
+    if(lastRow>=0 && (lastRow!=newRow || lastCol!=newCol)){
+      row=-1;col=-1;
+      paintKey(lastRow,lastCol);
+      row=newRow;col=newCol;
+    }
+    paintKey(newRow,newCol);
   }
-  tft.setTextColor(colors.dim,colors.bg);
-  tft.setCursor(6,270);
-  tft.print("D-pad Move  OK Type  B Delete");
+  lastUpper=upper;lastSymbols=symbols;lastRow=row;lastCol=col;
+  firstDraw=false;
   ui.softkeys("Done",symbols?"ABC":(upper?"abc":"SYM"),"Cancel");
 }

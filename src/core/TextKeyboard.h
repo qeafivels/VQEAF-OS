@@ -17,6 +17,8 @@ public:
 private:
   bool shown=false,done=false,cancel=false,masked=false,upper=false,symbols=false;
   String caption,text;
+  bool firstDraw=true, lastUpper=false, lastSymbols=false;
+  int lastRow=-1,lastCol=-1;
   int row=1,col=0;
   Key lastNumeric=Key::None;
   int numericTap=0;

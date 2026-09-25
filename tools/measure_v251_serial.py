@@ -16,6 +16,7 @@ from pathlib import Path
 
 RENDER_PREFIX = "[VQEAF][FPS]"
 LOOP_PREFIX = "[VQEAF][PERF]"
+CLOCK_PREFIX = "[VQEAF][CLOCK]"
 KEYVAL = re.compile(r"([A-Za-z][A-Za-z_0-9]*)=(-?[0-9]+)")
 BOOT = re.compile(r"(?:\brst:0x|ESP-ROM:|\[QEAPP\]\[PREVIOUS_RESET\]|Guru Meditation|Brownout detector|Task watchdog|\[S3DIAG\]\[BOOT\])", re.I)
 LAUNCH_FAIL = "[VQEAF][QEAPP][LAUNCH_FAIL]"
@@ -23,7 +24,7 @@ LAUNCH_FAIL = "[VQEAF][QEAPP][LAUNCH_FAIL]"
 
 def parse_lines(rows, *, origin):
     """Rows are (ISO timestamp, decoded Serial line) preserving original data."""
-    measurements, events, loops = [], [], []
+    measurements, events, loops, clocks = [], [], [], []
     boot_events, launch_failures = 0, 0
     for timestamp, line in rows:
         if RENDER_PREFIX in line:
@@ -34,6 +35,10 @@ def parse_lines(rows, *, origin):
             fields = {k: int(v) for k, v in KEYVAL.findall(line.split(LOOP_PREFIX, 1)[1])}
             if "samples" in fields:
                 loops.append({"timestamp": timestamp, **fields})
+        if CLOCK_PREFIX in line:
+            fields = {k: int(v) for k, v in KEYVAL.findall(line.split(CLOCK_PREFIX, 1)[1])}
+            if "observed_mhz" in fields:
+                clocks.append({"timestamp": timestamp, **fields})
         if BOOT.search(line):
             boot_events += 1
             events.append({"timestamp": timestamp, "event": "BOOT_OR_RESET_INDICATOR", "line": line})
@@ -50,6 +55,11 @@ def parse_lines(rows, *, origin):
         return round(sum(value * w for value, w in data) / mass, 1) if mass else None
     result = {
         "origin": origin,
+        "cpu_samples": len(clocks),
+        "target_cpu_mhz": clocks[0].get("target_mhz") if clocks else None,
+        "observed_cpu_mhz_min": min((x["observed_mhz"] for x in clocks), default=None),
+        "observed_cpu_mhz_max": max((x["observed_mhz"] for x in clocks), default=None),
+        "observed_cpu_mhz_mean": round(statistics.mean(x["observed_mhz"] for x in clocks), 2) if clocks else None,
         "windows": len(measurements),
         "device_sampled_duration_s": round(total_ms / 1000, 3),
         "game_rendered_frames": frames,
@@ -64,13 +74,14 @@ def parse_lines(rows, *, origin):
         "largest_internal_block_min_bytes": min((r["largest8"] for r in loops if "largest8" in r), default=None),
         "psram_free_min_bytes": min((r["psram"] for r in loops if "psram" in r), default=None),
         "notes": [
+            "The CPU MHz field is an on-device software getCpuFrequencyMhz() observation only when origin is serial_device; no physical oscillator measurement.",
             "FPS counts actual Pixel Snake draw operations, not ST7789 refresh rate or idle UI FPS.",
             "Input event latency starts after input.poll() returns, ends after firmware dispatch; not GPIO edge-to-photon latency.",
             "USB auto-reset at Serial-open is NOT proof that QEAPP installation caused a reset.",
             "A non-hardware sample or mock log must never be represented as a real device benchmark.",
         ]
     }
-    return result, measurements, loops, events
+    return result, measurements, loops, events, clocks
 
 
 def capture(port, baud, seconds, interactive):
@@ -107,7 +118,7 @@ def capture(port, baud, seconds, interactive):
                 iso = dt.datetime.now(dt.timezone.utc).isoformat()
                 line = data.decode("utf-8", errors="replace").rstrip("\r\n")
                 allrows.append((iso, line))
-                if BOOT.search(line) or RENDER_PREFIX in line or LAUNCH_FAIL in line:
+                if BOOT.search(line) or RENDER_PREFIX in line or CLOCK_PREFIX in line or LAUNCH_FAIL in line:
                     print(iso, line[:220], flush=True)
     finally:
         stop.set()
@@ -118,10 +129,10 @@ def write_reports(directory, rows, raw, origin):
     directory.mkdir(parents=True, exist_ok=True)
     if raw is not None: (directory / "serial_raw.bin").write_bytes(raw)
     (directory / "serial_timestamped.log").write_text("\n".join(f"{t} {s}" for t,s in rows)+"\n",encoding="utf-8")
-    result, measurements, loops, events = parse_lines(rows, origin=origin)
+    result, measurements, loops, events, clocks = parse_lines(rows, origin=origin)
     result["note"] = "No hardware FPS conclusion possible" if origin != "serial_device" else "Derived from actual device Serial (verify port/device identity)"
     (directory / "metrics.json").write_text(json.dumps(result,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
-    for filename, records in (("fps_windows.csv", measurements),("loop_windows.csv", loops),("events.csv", events)):
+    for filename, records in (("fps_windows.csv", measurements),("loop_windows.csv", loops),("clock_windows.csv", clocks),("events.csv", events)):
         with (directory / filename).open("w",newline="",encoding="utf-8") as f:
             headers = sorted({k for row in records for k in row})
             writer = csv.DictWriter(f,fieldnames=headers)
@@ -131,6 +142,10 @@ def write_reports(directory, rows, raw, origin):
     md = ["# VQEAF OS v2.5.1 — Device serial analysis", "",
           f"Source: `{origin}`; captured windows: {result['windows']}; sample span: {result['device_sampled_duration_s']} s", "",
           "| Metric | Value |", "|---|---:|",
+          f"| CPU target according to device | {fmt(result['target_cpu_mhz'],' MHz')} |",
+          f"| CPU observed (software min) | {fmt(result['observed_cpu_mhz_min'],' MHz')} |",
+          f"| CPU observed (software max) | {fmt(result['observed_cpu_mhz_max'],' MHz')} |",
+          f"| CPU clock samples | {result['cpu_samples']} |",
           f"| Game content-update FPS | {fmt(result['game_effective_fps'])} |",
           f"| Pixel Snake draw average | {fmt(result['game_draw_avg_us_weighted'],' us')} |",
           f"| Pixel Snake max draw | {fmt(result['game_draw_max_us'],' us')} |",

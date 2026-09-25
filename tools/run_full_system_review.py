@@ -35,7 +35,8 @@ def run(name,cmd,timeout=900):
 def sheet():
   # Convert genuine framebuffer bytes emitted by compiled C++ system UI.
   for stem in ("browser_keyboard","browser_keyboard_focus",
-               "wifi_keyboard_masked","system_notifications"):
+               "wifi_keyboard_masked","system_notifications",
+               "installer_revisit_open","installed_apps_open_menu"):
     ppm=P/(stem+".ppm")
     if ppm.exists(): Image.open(ppm).convert("RGB").save(P/(stem+".png"))
   images=[
@@ -45,6 +46,8 @@ def sheet():
     ("D-PAD FOCUS / production TextKeyboard.cpp",P/"browser_keyboard_focus.png"),
     ("WiFi PASSWORD / masked input",P/"wifi_keyboard_masked.png"),
     ("SYSTEM NOTIFICATIONS / production UI widgets",P/"system_notifications.png"),
+    ("REVISIT INSTALLED APP / verified menu policy",P/"installer_revisit_open.png"),
+    ("INSTALLED APPS / selected Open popup",P/"installed_apps_open_menu.png"),
   ]
   images=[(n,Image.open(f).convert("RGB")) for n,f in images if f.exists()]
   if not images: return
@@ -52,10 +55,11 @@ def sheet():
   font=ImageFont.truetype(fpath,12) if Path(fpath).exists() else ImageFont.load_default()
   scale=2
   w,h=240*scale,320*scale
-  page=Image.new("RGB",(3*(w+18)+18,2*(h+74)+70),"#1d2924")
+  # Eight screens: four across by two rows, each exactly 240x320 before scaling.
+  page=Image.new("RGB",(4*(w+18)+18,2*(h+74)+70),"#1d2924")
   d=ImageDraw.Draw(page)
   for i,(title,im) in enumerate(images):
-    x=18+(i%3)*(w+18);y=15+(i//3)*(h+74)
+    x=18+(i%4)*(w+18);y=15+(i//4)*(h+74)
     d.text((x,y),title,font=font,fill="#f2f7ed")
     page.paste(im.resize((w,h),Image.Resampling.NEAREST),(x,y+26))
   d.text((18,page.height-19),
@@ -88,6 +92,7 @@ gates=[
   ("storage_and_verified_tls",[sys.executable,"tools/test_v20_storage_tls.py"]),
   ("memory_and_sd_stability",[sys.executable,"tools/test_v19_stability.py"]),
   ("installer_reset_regression",[sys.executable,"tools/test_v244_install_reset.py"]),
+  ("reinstalled_qeapp_open_menu",[sys.executable,"tools/test_installer_revisit_open.py"]),
   ("full_v251_acceptance",[sys.executable,"tools/verify_v251.py","--full"]),
 ]
 for name,cmd in gates:
@@ -95,14 +100,14 @@ for name,cmd in gates:
     break
 sheet()
 report={
- "version":"VQEAF-OS v2.5.1 native Qeafbrowser + universal keyboard",
+ "version":"VQEAF-OS v2.5.1 native Qeafbrowser + universal keyboard + installed-app Open",
  "branch":"feat/system-vkeyboard-usb-sd-notices",
  "environment":"Linux host: actual C++ OS modules + Arduino/TFT mocks",
  "real_device_connected":False,
  "live_usb_vbus_test":"NOT_RUN - host link events only; charge-only cable cannot be detected",
  "live_micro_sd_hotplug":"NOT_RUN - requires physical board and safe idle card",
  "actual_lcd_photo":"NOT_AVAILABLE",
- "ui_capture":"REAL C++ host raster / ASCII via reference PC font shim, not physical LCD",
+ "ui_capture":"REAL C++ host raster / ASCII via reference PC font shim, not physical LCD; installed-app screenshots are constructed UI states using production widgets and menu policy, not device app execution",
  "status":"PASS" if len(results)==len(gates) and all(r["status"]=="PASS" for r in results) else "FAIL",
  "checks":results
 }

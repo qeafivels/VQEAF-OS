@@ -54,7 +54,7 @@ def sheet():
     d.text((x,y),title,font=font,fill="#f2f7ed")
     page.paste(im.resize((w,h),Image.Resampling.NEAREST),(x,y+26))
   d.text((18,page.height-19),
-    "C++ HOST RGB565 OUTPUT - NO PHYSICAL DEVICE - MOCK TFT DOES NOT RASTERIZE TEXT GLYPHS",
+    "C++ HOST RGB565 OUTPUT - NO PHYSICAL DEVICE - REFERENCE ASCII FONT SHIM; HARDWARE GLYPHS MAY DIFFER",
     font=font,fill="#fbdba2")
   page.save(P/"vqeaf_full_system_host_capture.png")
   for title,im in images:
@@ -63,7 +63,7 @@ def sheet():
 
 compile_command=[
   "g++","-std=c++11","-fpermissive","-Wall","-Wextra","-Werror",
-  "-Itools/vqeaf_host/preview_stubs","-Itools/host_stubs",
+  "-Itools/vqeaf_host/reference_stubs","-Itools/host_stubs",
   "-Iinclude","-Isrc","-Isrc/core",
   "tools/vqeaf_host/test_system_raster.cpp",
   "src/core/SymbianUI.cpp","src/core/VqeafIconRenderer.cpp",
@@ -97,7 +97,7 @@ report={
  "live_usb_vbus_test":"NOT_RUN - host link events only; charge-only cable cannot be detected",
  "live_micro_sd_hotplug":"NOT_RUN - requires physical board and safe idle card",
  "actual_lcd_photo":"NOT_AVAILABLE",
- "ui_capture":"REAL C++ host raster / fonts are host shim, not physical LCD",
+ "ui_capture":"REAL C++ host raster / ASCII via reference PC font shim, not physical LCD",
  "status":"PASS" if len(results)==len(gates) and all(r["status"]=="PASS" for r in results) else "FAIL",
  "checks":results
 }

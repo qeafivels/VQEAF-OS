@@ -17,7 +17,7 @@ checks={
  'calculator screen routed': 'case ScreenId::Calculator:' in main and 'calculatorApp.draw' in main,
  'stopwatch screen routed': 'case ScreenId::Stopwatch:' in main and 'stopwatchApp.tick' in main,
  'utility apps in Applications': '"Calculator","Stopwatch"' in apps,
- 'music auto-next in loop': 'musicApp.tick(appCtx, screen == ScreenId::Music)' in main,
+ 'music auto-next in loop': 'musicApp.tick(appCtx, screen == ScreenId::Music && !osBackConfirm.active())' in main,
  'WAV end drains DMA': 'finishDeadline=millis()+150UL' in svc,
  'bounded playlist no heap and nonrepeating shuffle': 'PlaylistNavigator playlist' in (r/'src/apps/Apps.h').read_text(),
  'music repeats Off/All/One': all(x in (r/'src/services/PlaylistNavigator.h').read_text() for x in ['Repeat::Off','Repeat::All','Repeat::One']),

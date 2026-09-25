@@ -62,6 +62,7 @@ static const LaunchDestination WEB[]={
 static const LaunchDestination APPS[]={
   {"AP","Applications","System utilities + QEAPP/2",ScreenId::Applications,nullptr},
   {"IN","App installer","Signed package inbox",ScreenId::AppInstaller,nullptr},
+  {"SK","Sketchpad","Draw and import legacy notes",ScreenId::Sketchpad,nullptr},
 };
 static const LaunchDestination MEDIA[]={
   {"GA","Gallery","Browse pictures",ScreenId::Gallery,nullptr},
@@ -69,6 +70,7 @@ static const LaunchDestination MEDIA[]={
   {"LI","Library","Explore media collections",ScreenId::Collection,nullptr},
   {"FI","File manager","SD card folders",ScreenId::Files,nullptr},
   {"TX","Text reader","Read TXT and Markdown",ScreenId::TextViewer,nullptr},
+  {"SK","Sketchpad","Three saved notebook pages",ScreenId::Sketchpad,nullptr},
 };
 static const LaunchDestination SYSTEM[]={
   {"WI","WiFi","Wireless connectivity",ScreenId::WiFi,nullptr},
@@ -2323,10 +2325,10 @@ static const char *const appOptions[] = {
   "Notifications", "Clock", "System info", "About"
 };
 static constexpr int APP_OPTIONS = sizeof(appOptions) / sizeof(appOptions[0]);
-static constexpr int APP_COUNT = 14;
+static constexpr int APP_COUNT = 15;
 static ScreenId applicationDestination(int n) {
   static const ScreenId dst[APP_COUNT] = {
-    ScreenId::Shell,ScreenId::TaskSwitcher,ScreenId::Notes,ScreenId::Notifications,
+    ScreenId::Shell,ScreenId::TaskSwitcher,ScreenId::Notes,ScreenId::Sketchpad,ScreenId::Notifications,
     ScreenId::TextViewer,ScreenId::Recovery,ScreenId::Clock,ScreenId::SystemInfo,
     ScreenId::About,ScreenId::Themes,ScreenId::AppInstaller,ScreenId::Files,
     ScreenId::Calculator,ScreenId::Stopwatch
@@ -2334,19 +2336,19 @@ static ScreenId applicationDestination(int n) {
   return dst[constrain(n,0,APP_COUNT-1)];
 }
 static const char *const applicationTitle[APP_COUNT] = {
- "Shell","Open apps","Notes","Notifications","Text viewer","Recovery",
+ "Shell","Open apps","Notes","Sketchpad","Notifications","Text viewer","Recovery",
  "Clock","System info","About","Themes","App installer","App inbox","Calculator","Stopwatch"
 };
 static const char *const applicationSub[APP_COUNT] = {
- "System terminal","Recent apps and resume","Quick note","System events",
+ "System terminal","Recent apps and resume","Quick note","Three notebook sketches","System events",
  "TXT/MD viewer","Safe Mode","Time","Memory and reset",
  "OS information","microSD themes","Install/uninstall QEAPP","Downloaded packages",
  "Portrait keypad arithmetic","Timer and 4 lap records"
 };
-static const char *const applicationIcon[APP_COUNT]={"Term","App","Note","Bell","Doc","Rec","Clk","Sys","i","Th","App","Dir","Calc","Clk"};
+static const char *const applicationIcon[APP_COUNT]={"Term","App","Note","Note","Bell","Doc","Rec","Clk","Sys","i","Th","App","Dir","Calc","Clk"};
 
 ScreenId ApplicationsApp::openSelected(AppContext &ctx){
- if(index<APP_COUNT){if(index==11)ctx.pendingFolderPath=StoragePaths::APPS_INBOX;return applicationDestination(index);}
+ if(index<APP_COUNT){if(index==12)ctx.pendingFolderPath=StoragePaths::APPS_INBOX;return applicationDestination(index);}
  int n=index-APP_COUNT;
  if(n>=0&&n<ctx.installer.count()){
    ctx.pendingPackageId=ctx.installer.at(n).info.id;

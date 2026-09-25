@@ -102,6 +102,7 @@ bool SystemService::isTaskScreen(ScreenId s) {
     case ScreenId::AppInstaller:
     case ScreenId::Notifications:
     case ScreenId::Notes:
+    case ScreenId::Sketchpad:
     case ScreenId::Recovery:
     case ScreenId::Clock:
     case ScreenId::SystemInfo:
@@ -196,6 +197,7 @@ const char *SystemService::screenName(ScreenId s) {
     case ScreenId::AppInstaller: return "App installer";
     case ScreenId::Notifications: return "Notifications";
     case ScreenId::Notes: return "Notes";
+    case ScreenId::Sketchpad: return "Sketchpad";
     case ScreenId::Recovery: return "Recovery";
     case ScreenId::Clock: return "Clock";
     case ScreenId::SystemInfo: return "System info";
@@ -227,6 +229,7 @@ const char *SystemService::screenIcon(ScreenId s) {
     case ScreenId::AppInstaller: return "App";
     case ScreenId::Notifications: return "Bell";
     case ScreenId::Notes: return "Note";
+    case ScreenId::Sketchpad: return "Note";
     case ScreenId::Recovery: return "Rec";
     case ScreenId::Clock: return "Clk";
     case ScreenId::SystemInfo: return "Sys";

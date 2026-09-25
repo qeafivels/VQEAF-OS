@@ -33,6 +33,7 @@ class OsBackConfirm {
       case ScreenId::TextViewer:
       case ScreenId::Shell:
       case ScreenId::Notes:
+      case ScreenId::Sketchpad:
       case ScreenId::Calculator:
       case ScreenId::Stopwatch: return true;
       default: return false;

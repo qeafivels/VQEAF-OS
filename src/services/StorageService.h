@@ -19,6 +19,8 @@ static const char * const MEDIA = "/Media";
 static const char * const MUSIC = "/Media/Music";
 static const char * const PICTURES = "/Media/Pictures";
 static const char * const DOCUMENTS = "/Documents";
+static const char * const SKETCHPAD = "/Documents/Sketchpad";
+static const char * const SKETCHPAD_LEGACY = "/Documents/Sketchpad/legacy";
 }
 
 struct FsEntry {

@@ -10,6 +10,7 @@ on:
       - 'tools/provision_lua_beta_key.py'
       - 'tools/lua_beta_host/**'
       - 'tools/test_lua_frame_present.py'
+      - 'tools/test_lua_transition_noblank.py'
       - 'tools/build_qeapp.py'
       - 'platformio.ini'
       - '.github/workflows/qeapp-lua-beta-ci.yml'
@@ -38,7 +39,9 @@ jobs:
       - name: Test actual bounded Lua runtime using official C interpreter on host
         run: python tools/test_lua_beta_vm.py
       - name: Test Lua PSRAM frame gate and modal repaint on host
-        run: python tools/test_lua_frame_present.py
+        run: |
+          python tools/test_lua_frame_present.py
+          python tools/test_lua_transition_noblank.py
       - name: Build unchanged default stock OS (production key, Lua disabled)
         run: pio run -e vqeaf_os
       - name: Generate single-run ephemeral beta key - never publish a private key

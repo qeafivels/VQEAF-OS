@@ -33,6 +33,11 @@ def run(name,cmd,timeout=900):
   return good
 
 def sheet():
+  # Convert genuine framebuffer bytes emitted by compiled C++ system UI.
+  for stem in ("browser_keyboard","browser_keyboard_focus",
+               "wifi_keyboard_masked","system_notifications"):
+    ppm=P/(stem+".ppm")
+    if ppm.exists(): Image.open(ppm).convert("RGB").save(P/(stem+".png"))
   images=[
     ("HOME / production SymbianUI.cpp",P/"v23_home_host_raster.png"),
     ("APP MENU / production SymbianUI.cpp",P/"v23_menu_host_raster.png"),

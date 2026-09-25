@@ -19,7 +19,7 @@ def gate(ok, why):
 
 for route in ("mtt:start","mtt:history","mtt:bookmark","mtt:help","mtt:about"):
     gate(route in service, "route missing: "+route)
-gate("validWebUrl(url.c_str())" in service, "bookmark loading must validate untrusted SD data")
+gate("validWebUrl(line)" in service, "bookmark loading must validate untrusted SD data")
 gate("storage->recoverAtomicFile(kBrowserBookmarksPath)" in service, "recover interrupted bookmark writes")
 gate("storage->writeAtomic(kBrowserBookmarksPath" in service, "bookmark persistence must be atomic")
 gate("storage->mounted()" in service, "storage must be optional")

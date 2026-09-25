@@ -457,10 +457,27 @@ void BrowserService::loadBookmarks() {
   storage->recoverAtomicFile(kBrowserBookmarksPath);
   File f=storage->fs().open(kBrowserBookmarksPath,FILE_READ);
   if(!f || f.isDirectory()) { if(f) f.close(); return; }
+  // Bounded byte reader also works with the firmware's host FS mock;
+  // Stream::readStringUntil is not part of its minimal File interface.
+  char line[192];size_t len=0;bool overflow=false;
   while(f.available() && bookmarkUsed<BOOKMARK_MAX) {
-    String url=f.readStringUntil('\n');url.trim();
-    if(url.length() && url.length()<sizeof(bookmarks[0]) && validWebUrl(url.c_str()))
-      snprintf(bookmarks[bookmarkUsed++],192,"%s",url.c_str());
+    char ch=0;
+    if(f.readBytes(&ch,1)!=1) break;
+    if(ch!='\n') {
+      if(ch!='\r') {
+        if(len<sizeof(line)-1) line[len++]=ch;
+        else overflow=true;
+      }
+      continue;
+    }
+    line[len]=0;
+    if(!overflow && len && validWebUrl(line))
+      snprintf(bookmarks[bookmarkUsed++],192,"%s",line);
+    len=0;overflow=false;
+  }
+  if(!overflow && len && bookmarkUsed<BOOKMARK_MAX) {
+    line[len]=0;
+    if(validWebUrl(line)) snprintf(bookmarks[bookmarkUsed++],192,"%s",line);
   }
   f.close();
 }

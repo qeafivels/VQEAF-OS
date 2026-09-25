@@ -40,3 +40,7 @@ Test Snake/Browser/Music/Gallery: Back nội bộ giữ nguyên hành vi; chỉ 
 - Studio và hai ứng dụng mẫu: `qeafivels/QEAPP-Studio`.
 
 **Không sửa `main` hoặc phát hành firmware.bin chỉ dựa trên host tests.**
+
+## CI PlatformIO: Arduino FS header discovery
+
+GitHub Actions first target build of the release branch failed because PlatformIO LDF (deep+, strict) listed `FS` and `SD_MMC` but compiled `SD_MMC.cpp` **without** the Arduino `FS/src` include directory (`FS.h: No such file or directory`). This is a build-system dependency issue, not proof that Back r2 caused a firmware compile regression. A follow-up commit adds only a framework-resolved FS include directory through `extra_scripts = pre:tools/pio_fs_sdmmc_dependency.py` and a dependency-free host smoke for that path. A successful **new** target CI build must still be verified; physical board verification remains outstanding.

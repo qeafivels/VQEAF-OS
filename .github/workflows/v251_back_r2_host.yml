@@ -25,6 +25,8 @@ jobs:
           python-version: '3.11'
       - name: Install Python host dependencies
         run: python -m pip install cryptography Pillow pyserial
+      - name: Verify Arduino FS path helper (host mock)
+        run: python tools/test_pio_fs_dependency.py
       - name: Verify C++11 Back state machine and input routing
         run: python tools/test_backguard_v251.py
       - name: Run v2.5.1 eight-stage host acceptance

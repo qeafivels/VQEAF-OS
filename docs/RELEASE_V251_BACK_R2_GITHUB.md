@@ -44,3 +44,7 @@ Test Snake/Browser/Music/Gallery: Back nội bộ giữ nguyên hành vi; chỉ 
 ## CI PlatformIO: Arduino FS header discovery
 
 GitHub Actions first target build of the release branch failed because PlatformIO LDF (deep+, strict) listed `FS` and `SD_MMC` but compiled `SD_MMC.cpp` **without** the Arduino `FS/src` include directory (`FS.h: No such file or directory`). This is a build-system dependency issue, not proof that Back r2 caused a firmware compile regression. A follow-up commit adds only a framework-resolved FS include directory through `extra_scripts = pre:tools/pio_fs_sdmmc_dependency.py` and a dependency-free host smoke for that path. A successful **new** target CI build must still be verified; physical board verification remains outstanding.
+
+## CI: SCons verbose output and image generation
+
+After correcting the SD_MMC/FS include path, the first rerun compiled and linked `firmware.elf` (RAM 88,700 / 327,680 B; Flash 1,503,625 / 6,553,600 B), but failed during `firmware.bin` generation because PlatformIO 6.2.0 / SCons 4.11.1 tried to print a verbose command as `_Null` (`TypeError` in `SCons.Action.print_cmd_line`). `tools/build_pio.py` now invokes normal `pio run -e vqeaf_os` instead of always using `-v`. Logs still capture normal compiler/build errors. This is a build tool compatibility change, not a renderer or firmware logic change; verify the subsequent CI generated `firmware.bin` before marking target build PASS.

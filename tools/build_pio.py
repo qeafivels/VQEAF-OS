@@ -83,7 +83,10 @@ def main():
             code,out=run([pio,'--version'],REPORT/'platformio_version.log')
             if code:status['platformio_target']='BLOCKED_PIO_VERSION';return 2
             status['platformio_version']=out.strip().splitlines()[-1] if out.strip() else 'UNKNOWN'
-            code,_=run([pio,'run','-e','vqeaf_os','-v'],REPORT/'platformio_build.log')
+            # PlatformIO 6.2 / SCons 4.11 may print an invalid _Null action
+            # string for Arduino ESP32 elf2image when '-v' is used. Normal
+            # mode still captures all errors in build_reports/platformio_build.log.
+            code,_=run([pio,'run','-e','vqeaf_os'],REPORT/'platformio_build.log')
             status['platformio_target']='PASS' if code==0 else 'FAIL'
             if code:return code
             firmware=ROOT/'.pio/build/vqeaf_os/firmware.bin'

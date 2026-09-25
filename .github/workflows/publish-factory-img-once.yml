@@ -1,4 +1,4 @@
-# Temporary, one-shot. Remove after verified Release upload.
+# Temporary one-time publisher; remove this workflow once the release assets verify.
 name: Attach verified factory IMG to v2.5.1 Back r2 release
 on:
   push:
@@ -12,80 +12,83 @@ jobs:
   publish-factory-img:
     if: github.repository == 'qeafivels/VQEAF-OS'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: v2.5.1-back-r2
-      EXPECTED_SHA: 512a51a7ab0ae57f5ce4c56ded47ad6f06612d9e
+      TAG_COMMIT: 512a51a7ab0ae57f5ce4c56ded47ad6f06612d9e
+      VERIFIED_BUILD_SHA: 227123e8cb9e581cf32ed1d998da7d5b65e1e7bb
+      CI_RUN_ID: '36123255878'
+      CI_ARTIFACT_ID: '10858479643'
+      CI_ARTIFACT_SHA256: 9444ce88ad49ef3f0a4347f11263c167f1d748eb93e1eaa4bdcc8f5abdd0a229
+      IMG_SHA256: 3dfc0f31f5b22dd831c5491d452cf599b4a2a95a4c27b47b35595cac85f688b8
       FIRMWARE_SHA256: e68c66fc1200ee3ae897a3fe91c19c4ee366fd39f5880cb6de66924e486e5c87
       PARTITIONS_SHA256: bd0f7954aca2ef7d925ee21aaa1f3dc8822d1d6ce5cbbd26a135e5886bfff6ce
       IMG: VQEAF-OS_v2.5.1_Back-r2_factory.img
     steps:
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          ref: v2.5.1-back-r2
-          path: tagged-source
-          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Check tag provenance, release and existing IMG asset
+      - name: Verify source equivalence and original successful CI provenance
         shell: bash
         run: |
           set -euo pipefail
-          [[ $(git -C tagged-source rev-parse HEAD) == "$EXPECTED_SHA" ]]
-          actual=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq '.object.sha')
-          [[ "$actual" == "$EXPECTED_SHA" ]]
+          [[ $(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq '.object.sha') == "$TAG_COMMIT" ]]
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq '.isPrerelease' | grep -qx true
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -q -x "$IMG"; then
-            echo 'The IMG asset already exists; refusing to overwrite it'; exit 1
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qx "$IMG"; then
+            echo 'Factory IMG already exists on Release; refusing overwrite'; exit 1
           fi
-      - name: Install pinned toolchain, test packaging, build exact tagged firmware
+          [[ $(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CI_RUN_ID}" --jq '.head_sha') == "$VERIFIED_BUILD_SHA" ]]
+          [[ $(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CI_RUN_ID}" --jq '.conclusion') == 'success' ]]
+          [[ $(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${CI_ARTIFACT_ID}" --jq '.workflow_run.head_sha') == "$VERIFIED_BUILD_SHA" ]]
+          [[ $(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${CI_ARTIFACT_ID}" --jq '.digest') == "sha256:${CI_ARTIFACT_SHA256}" ]]
+          gh api "repos/${GITHUB_REPOSITORY}/compare/${TAG_COMMIT}...${VERIFIED_BUILD_SHA}" --jq '.files[].filename' > "$RUNNER_TEMP/changes_since_tag.txt"
+          if grep -E '^(src/|include/|boards/|partitions/|platformio.ini$|tools/build_pio.py$|tools/pio_fs_sdmmc_dependency.py$)' "$RUNNER_TEMP/changes_since_tag.txt"; then
+            echo 'Code/board/build config differs from tagged Release: refusing IMG upload'; exit 1
+          fi
+      - name: Extract and independently verify IMG from successful PlatformIO CI
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install platformio pillow
-          python -m unittest discover -s tools -p test_factory_img.py -v
-          python tagged-source/tools/build_pio.py --target-only
-          test -s tagged-source/.pio/build/vqeaf_os/bootloader.bin
-      - name: Generate full 16 MiB IMG and verify exact Release SHA
+          mkdir -p out
+          curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${CI_ARTIFACT_ID}/zip" \
+            -o "$RUNNER_TEMP/verified-ci-artifact.zip"
+          echo "$CI_ARTIFACT_SHA256  $RUNNER_TEMP/verified-ci-artifact.zip" | sha256sum -c -
+          unzip -tqq "$RUNNER_TEMP/verified-ci-artifact.zip"
+          unzip -p "$RUNNER_TEMP/verified-ci-artifact.zip" 'dist/VQEAF-OS_factory_ESP32S3_N16R8.img' > "out/$IMG"
+          unzip -p "$RUNNER_TEMP/verified-ci-artifact.zip" 'dist/VQEAF-OS_factory_ESP32S3_N16R8.img.json' > "out/$IMG.json"
+          echo "$IMG_SHA256  out/$IMG" | sha256sum -c -
+          python tools/build_factory_img.py --verify-only --output "out/$IMG"
+          python - <<'PY'
+          import json, os, pathlib
+          m = json.loads(pathlib.Path('out', os.environ['IMG'] + '.json').read_text())
+          segments = {entry['name']:entry['sha256'] for entry in m['segments']}
+          assert m['chip'] == 'esp32s3' and m['board'] == 'vqeaf_s3_n16r8' and m['flash_size'] == 16777216
+          assert segments['firmware'] == os.environ['FIRMWARE_SHA256']
+          assert segments['partitions'] == os.environ['PARTITIONS_SHA256']
+          PY
+          (cd out && sha256sum "$IMG" "$IMG.json" > VQEAF-OS_v2.5.1_Back-r2_IMG_SHA256SUMS.txt)
+      - name: Add factory IMG as default CLEAN-INSTALL asset and document data loss
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p dist
-          python tools/build_factory_img.py \
-            --project-root tagged-source \
-            --build-dir tagged-source/.pio/build/vqeaf_os \
-            --expected-firmware-sha256 "$FIRMWARE_SHA256" \
-            --expected-partitions-sha256 "$PARTITIONS_SHA256" \
-            --output "dist/$IMG"
-          python tools/build_factory_img.py --verify-only --output "dist/$IMG"
-          (cd dist && sha256sum "$IMG" "$IMG.json" > VQEAF-OS_v2.5.1_Back-r2_IMG_SHA256SUMS.txt)
-      - name: Upload checked IMG as the default clean-install Release package
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh release upload "$TAG" "dist/$IMG" "dist/$IMG.json" \
-            dist/VQEAF-OS_v2.5.1_Back-r2_IMG_SHA256SUMS.txt \
-            --repo "$GITHUB_REPOSITORY"
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets \
-            --jq '.assets[].name' | grep -x "$IMG"
-          original=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
-          printf '%s\n\n' "$original" > "$RUNNER_TEMP/updated-release-notes.md"
+          gh release upload "$TAG" "out/$IMG" "out/$IMG.json" \
+            out/VQEAF-OS_v2.5.1_Back-r2_IMG_SHA256SUMS.txt --repo "$GITHUB_REPOSITORY"
+          [[ $(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" --jq ".assets[] | select(.name == \"${IMG}\") | .digest") == "sha256:${IMG_SHA256}" ]]
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq '.body' > "$RUNNER_TEMP/updated-release-notes.md"
           cat >> "$RUNNER_TEMP/updated-release-notes.md" <<'EOF'
 
-          ## Gói cài hệ điều hành mặc định cho **CÀI MỚI**: `.img`
+          ## Gói cài mặc định cho **CÀI MỚI SẠCH**: `.img`
 
-          **Tải `VQEAF-OS_v2.5.1_Back-r2_factory.img` khi cần cài sạch thiết bị ESP32-S3 N16R8.** Đây là ảnh Flash **16 MiB** gồm bootloader, bảng phân vùng, boot_app0 và firmware của đúng tag; có manifest `.img.json` và `IMG_SHA256SUMS.txt`.
+          Tải **`VQEAF-OS_v2.5.1_Back-r2_factory.img`** (16 MiB) khi cài mới đúng bo **ESP32-S3 N16R8**. Kèm `.img.json` mô tả bố cục và `IMG_SHA256SUMS.txt`. Firmware bên trong có SHA-256 khớp **chính xác** file `.bin` của tag Release này. Bootloader và dữ liệu OTA ban đầu được ghép trên CI từ cùng mã nguồn và cấu hình board, với kiểm thử an toàn vùng Flash.
 
-          **Cảnh báo:** Nạp ảnh `.img` từ `0x0` sẽ **ghi đè toàn bộ NVS, dữ liệu OTA, LittleFS/SPIFFS và coredump**. Sao lưu toàn bộ Flash 16 MiB và thẻ SD trước khi cài. Không dùng `.img` để cập nhật máy đang có dữ liệu; hãy dùng PlatformIO và gói `firmware.bin` phù hợp. Không dùng cho board khác hoặc Secure Boot/Flash Encryption. Bản này vẫn là **Pre-release**, chưa được nghiệm thu trên phần cứng thật.
+          **CẢNH BÁO MẤT DỮ LIỆU:** `.img` ghi toàn bộ Flash từ `0x0`, xóa/ghi đè NVS, dữ liệu OTA, LittleFS và coredump. **Sao lưu Flash 16 MiB và thẻ SD** trước khi dùng. Không nạp cho bo khác hoặc máy đang bật Flash Encryption/Secure Boot. **Để cập nhật giữ dữ liệu, dùng PlatformIO và `firmware.bin` thay vì `.img`**. Bản này vẫn là Pre-release; chưa kiểm thử trực tiếp trên thiết bị.
 
-          Ví dụ chỉ sau khi sao lưu và xác nhận N16R8: `python -m esptool --chip esp32s3 --port COM5 write_flash 0x0 VQEAF-OS_v2.5.1_Back-r2_factory.img`
-
-          [Hướng dẫn tiếng Việt: cài đặt và tự đóng gói `.img`](https://github.com/qeafivels/VQEAF-OS/blob/main/docs/FACTORY_IMG_INSTALL_V251_VN.md)
+          [Hướng dẫn cài đặt `.img` bằng tiếng Việt](https://github.com/qeafivels/VQEAF-OS/blob/main/docs/FACTORY_IMG_INSTALL_V251_VN.md)
           EOF
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/updated-release-notes.md"
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets,isPrerelease,tagName,url

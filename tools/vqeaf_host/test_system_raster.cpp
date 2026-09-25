@@ -2,6 +2,7 @@
 // PC TFT RGB565 framebuffer shim. These are not photographs or hardware fonts.
 #include "core/SymbianUI.h"
 #include "core/TextKeyboard.h"
+#include "apps/InstallerMenuPolicy.h"
 #include "services/NotificationService.h"
 #include <cassert>
 #include <cstring>
@@ -49,5 +50,29 @@ int main(int argc,char **argv){
   }
   ui.softkeys("Options","Open","Back");
   screen.savePPM((prefix+"system_notifications.ppm").c_str());
-  puts("PASS: actual C++ host RGB565 browser keyboard, focus dirty redraw, masked input and notifications UI");
+  // These two review images show a deliberately constructed, VERIFIED state
+  // using production SymbianUI.cpp and the actual InstallerMenuPolicy.h. They
+  // are UI state previews, NOT a claim that an app actually ran on a device.
+  using namespace InstallerMenuPolicy;
+  assert(primary(false,true,true,true,false)==Primary::Open);
+  assert(canOpen(false,true,true,false));
+  ui.clear();
+  ui.chrome("App inbox",false,false,true,false);
+  ui.message("Signature verified","Welcome","Version 1.0 / text",
+             "Already installed - choose Open");
+  ui.drawIcon(101,167,"App",ui.c().bg);
+  ui.softkeys("Options","Open","Back");
+  screen.savePPM((prefix+"installer_revisit_open.ppm").c_str());
+  assert(primary(true,true,true,true,false)==Primary::Open);
+  ui.clear();
+  ui.chrome("Installed apps",false,false,true,false);
+  ui.listItem(0,"App","Welcome","v1.0.0 / text",true);
+  ui.listItem(1,"App","Sample game","Lua beta - UI sample",false);
+  ui.softkeys("Options","Open","Back");
+  const char *const actions[]={"Details","Open","Inbox / Installed",
+                                "Rescan","Applications","Recover installs",
+                                "Reset app data","Uninstall"};
+  ui.popupMenu(actions,8,1,0,5);
+  screen.savePPM((prefix+"installed_apps_open_menu.ppm").c_str());
+  puts("PASS: actual C++ host RGB565 keyboard, focus redraw, notifications + verified installer menu-state previews");
 }

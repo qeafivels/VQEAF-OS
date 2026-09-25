@@ -36,26 +36,82 @@
 
 #if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
 #include "lua/QeLuaRuntime.h"
+#include "lua/QeLuaFramePolicy.h"
 static QeLuaRuntime luaVm;
 static uint32_t luaPreviousAt=0, luaNextFrameAt=0;
 static char luaRunningName[41]="Lua application";
 // All beta drawing is clipped by VM to the 240x270 application viewport.
 // Existing system chrome/footer and original VQEAF renderer stay unchanged.
+// Stage all script primitives offscreen. Never expose engine.clear() on LCD.
 static void luaRect(void *u,int x,int y,int w,int h,uint16_t color) {
-  static_cast<TFT_eSPI*>(u)->fillRect(x,y+29,w,h,color);
+  static_cast<TFT_eSprite*>(u)->fillRect(x,y,w,h,color);
 }
 static void luaText(void *u,int x,int y,const char *value,uint16_t color) {
-  auto *t=static_cast<TFT_eSPI*>(u);
-  t->setTextColor(color);
-  t->setTextFont(1);
-  t->setTextSize(1);
-  t->setCursor(x,y+29);
-  t->print(value);
+  auto *canvas=static_cast<TFT_eSprite*>(u);
+  canvas->setTextColor(color); // Preserve background behind text.
+  canvas->setTextFont(1);
+  canvas->setTextSize(1);
+  canvas->setCursor(x,y);
+  canvas->print(value);
 }
 static uint32_t luaMillis(void*) {return millis();}
 #endif
 
 static TFT_eSPI tft;
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+// 240x270x2 = 129,600B; two full RGB565 images require ~253 KiB PSRAM.
+// The 29px status bar / 21px softkeys stay with the unchanged OS renderer.
+static TFT_eSprite luaCanvas(&tft);
+static uint16_t *luaLastFrame=nullptr;
+static QeLuaFramePolicy luaFramePolicy;
+static uint32_t luaFlushed=0, luaUnchanged=0, luaFlushUs=0, luaStatsAt=0;
+static bool luaPrepareCanvas() {
+  if (!psramFound() || heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) <
+      2 * QeLuaFramePolicy::kBytes + 65536) return false;
+  luaCanvas.setAttribute(PSRAM_ENABLE, 1);
+  luaCanvas.setColorDepth(16);
+  if (!luaCanvas.createSprite(QeLuaFramePolicy::kWidth, QeLuaFramePolicy::kHeight)) return false;
+  luaLastFrame=static_cast<uint16_t*>(heap_caps_malloc(QeLuaFramePolicy::kBytes,
+                                      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (!luaLastFrame) { luaCanvas.deleteSprite(); return false; }
+  luaCanvas.fillSprite(TFT_BLACK);
+  luaFramePolicy.invalidate();
+  luaFlushed=luaUnchanged=luaFlushUs=0;
+  luaStatsAt=millis();
+  Serial.printf("[VQEAF][LUA][FRAME] offscreen + snapshot ready, %lu bytes PSRAM\n",
+                (unsigned long)(2 * QeLuaFramePolicy::kBytes));
+  return true;
+}
+static void luaReleaseCanvas() {
+  luaCanvas.deleteSprite();
+  if (luaLastFrame) { heap_caps_free(luaLastFrame); luaLastFrame=nullptr; }
+  luaFramePolicy.invalidate();
+}
+static bool luaPresentFrame() {
+  if (!luaCanvas.created() || !luaLastFrame) return false;
+  const auto *pixels=static_cast<const uint16_t*>(luaCanvas.getPointer());
+  if (!pixels) return false;
+  // One LCD transaction at the end of a complete successful callback.
+  // The full-image memcmp also skips redundant clears of an unchanged frame.
+  if (luaFramePolicy.needsPresent(pixels,luaLastFrame)) {
+    const uint32_t started=micros();
+    luaCanvas.pushSprite(0,29); // TFT_eSprite preserves TFT swapBytes state.
+    luaFlushUs+=uint32_t(micros()-started);
+    memcpy(luaLastFrame,pixels,QeLuaFramePolicy::kBytes);
+    luaFramePolicy.markPresented();
+    ++luaFlushed;
+  } else ++luaUnchanged;
+  const uint32_t now=millis();
+  if (uint32_t(now-luaStatsAt)>=5000) {
+    Serial.printf("[VQEAF][LUA][FRAME] flush=%lu same=%lu avg_spi_us=%lu free_psram=%lu\n",
+      (unsigned long)luaFlushed,(unsigned long)luaUnchanged,
+      (unsigned long)(luaFlushed?luaFlushUs/luaFlushed:0),
+      (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    luaFlushed=luaUnchanged=luaFlushUs=0; luaStatsAt=now;
+  }
+  return true;
+}
+#endif
 static VqeafUI ui(tft); // compatibility adapter over the existing UI implementation
 static InputManager input;
 static SettingsStore settings;
@@ -209,7 +265,7 @@ static void enterScreen(ScreenId s, bool animate = true, bool resume = false) {
 #endif
   ScreenId from = screen;
 #if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
-  if (from == ScreenId::LuaApp && s != ScreenId::LuaApp) luaVm.stop();
+  if (from == ScreenId::LuaApp && s != ScreenId::LuaApp) { luaVm.stop(); luaReleaseCanvas(); }
 #endif
   // Forced navigation (card removal/auto-lock/etc.) must invalidate a pending
   // confirmation so it can never confirm a stale app after the new screen loads.
@@ -273,11 +329,14 @@ static void enterScreen(ScreenId s, bool animate = true, bool resume = false) {
             valid=Qeapp::equalHash(digest,signedHeader+84) && !memchr(code,0,size);
             if(valid)code[size]=0;
           }
-          QeLuaRuntime::Draw draw={luaRect,luaText,luaMillis,&tft};
-          const bool started=valid && luaVm.start(code,size,draw,192*1024);
+          const bool canvasReady=valid && luaPrepareCanvas();
+          QeLuaRuntime::Draw draw={luaRect,luaText,luaMillis,&luaCanvas};
+          const bool started=canvasReady && luaVm.start(code,size,draw,192*1024);
           if(code)heap_caps_free(code);
           if(!started) {
-            launchFeedback=valid?luaVm.error():"Lua payload invalid, changed or out of PSRAM";
+            launchFeedback=!valid?"Lua payload invalid or changed":
+                           !canvasReady?"Lua display buffers unavailable in PSRAM":luaVm.error();
+            luaReleaseCanvas();
             Serial.printf("[VQEAF][LUA] launch rejected id=%s reason=%s\n",meta.id,launchFeedback.c_str());
             notifications.push("Lua app error",launchFeedback);
             s=ScreenId::Applications;
@@ -334,7 +393,12 @@ static void enterScreen(ScreenId s, bool animate = true, bool resume = false) {
                   s == ScreenId::Themes ? "Themes" : "App installer");
   }
   screen = s;
-  if (s != ScreenId::Idle && s != ScreenId::Lock && s != ScreenId::Splash) ui.clearContent();
+  // Avoid a physical blank frame on Back-cancel when resuming the SAME VM.
+  if (s != ScreenId::Idle && s != ScreenId::Lock && s != ScreenId::Splash
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+      && !(s == ScreenId::LuaApp && from == ScreenId::LuaApp && resume)
+#endif
+      ) ui.clearContent();
   switch (s) {
     case ScreenId::Idle:
       restoreBacklight(); drawIdle(); break;
@@ -368,10 +432,14 @@ static void enterScreen(ScreenId s, bool animate = true, bool resume = false) {
     case ScreenId::LuaApp:
       ui.chrome(luaRunningName,wifiConnected(),false,false,settings.data().hour12);
       ui.softkeys("","","Back");
-      if (!luaVm.render()) {
-        launchFeedback=luaVm.error();
+      if (resume) luaFramePolicy.invalidate(); // Restore viewport beneath OS dialog.
+      if ((!resume && !luaVm.render()) || !luaPresentFrame()) {
+        launchFeedback=luaVm.running()?"Lua viewport flush failed":luaVm.error();
         notifications.push("Lua runtime",launchFeedback);
         enterScreen(ScreenId::Applications,false);
+      } else if (!resume) {
+        // First frame already visible: wait full 50ms before the next callback.
+        luaPreviousAt=millis(); luaNextFrameAt=luaPreviousAt+50;
       }
       break;
 #endif
@@ -769,7 +837,7 @@ void loop() {
     uint32_t now=millis();
     const float dt=float(now-luaPreviousAt)/1000.0f;
     luaPreviousAt=now;luaNextFrameAt=now+50; // beta: cap to ~20 FPS
-    if(!luaVm.update(dt) || !luaVm.render()) {
+    if(!luaVm.update(dt) || !luaVm.render() || !luaPresentFrame()) {
       String reason=luaVm.error();
       Serial.printf("[VQEAF][LUA] callback rejected reason=%s\n",reason.c_str());
       notifications.push("Lua runtime",reason);

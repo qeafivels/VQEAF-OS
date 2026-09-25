@@ -46,7 +46,7 @@ int main(){
   assert(!canOpen(true,false,false,false));
   assert(canOpen(true,true,true,false));
   // Rejected signature can never turn into a launch route.
-  assert(!canOpen(false,false,false,true,false));
+  assert(!canOpen(false,false,true,false));
   assert(!canOpen(true,false,true,false));
   puts("PASS: installer Open/Install/Update/Verify matrix + verified launch guard");
 }

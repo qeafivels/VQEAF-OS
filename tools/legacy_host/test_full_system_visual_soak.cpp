@@ -98,7 +98,8 @@ int main(int argc,char **argv){
       ++validRestores;
     }
     if(i%11==0) {
-      const unsigned at=unsigned(SketchpadModel::HEADER_BYTES+(n-SketchpadModel::HEADER_BYTES)/2);
+      const unsigned at=n>SketchpadModel::HEADER_BYTES ?
+        unsigned(SketchpadModel::HEADER_BYTES+(n-SketchpadModel::HEADER_BYTES)/2) : 7u;
       buffer[at]^=uint8_t(1u+(i%127));
       SketchpadModel lastValid=state;
       assert(!lastValid.decode(buffer,n));

@@ -29,7 +29,6 @@ uint32_t vqeafFakeMillis=0;
 static KeyEvent k(Key key){return KeyEvent(key,true,false,false);}
 static void send(TextKeyboard &kb,Key key){assert(kb.handle(k(key)));}
 static void up(TextKeyboard &kb,int n){while(n--)send(kb,Key::Up);}
-static void down(TextKeyboard &kb,int n){while(n--)send(kb,Key::Down);}
 int main(){
   TextKeyboard kb;
   kb.open("Web address");

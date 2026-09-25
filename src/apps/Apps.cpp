@@ -1418,12 +1418,28 @@ void BrowserApp::enter(AppContext &ctx) {
 }
 
 void BrowserApp::redrawBody(AppContext &ctx) {
-  ctx.ui.clearContent();
+  // Do not blank the full viewport on every D-pad scroll. Repaint each row
+  // completely, then the scrollbar; avoid exposing a full black/empty frame.
   TFT_eSPI &d=ctx.ui.display(); ThemeColors c=ctx.ui.c();
+  d.fillRect(0,29,240,35,c.bg);
   d.fillRect(5,36,230,24,c.panel); d.drawRect(5,36,230,24,c.dim);
   d.setTextFont(1); d.setTextColor(c.dim,c.panel); String u=ctx.browser.url(); if(u.length()>38)u=u.substring(0,37)+"~"; d.setCursor(9,44); d.print(u); if(ctx.browser.pageFromCache()){d.setTextColor(c.accent,c.panel);d.setCursor(201,44);d.print("C");}
   int y=66;
-  for(int row=0;row<BROWSER_VISIBLE;++row){int i=offset+row;if(i>=ctx.browser.lineCount())break;const BrowserLine &ln=ctx.browser.lineAt(i);bool sel=ln.link>=0&&ln.link==selectedLink;uint16_t bg=sel?c.selected:c.bg;d.fillRect(4,y-2,232,15,bg);d.setTextColor(ln.link>=0?0x05FF:c.text,bg);d.setCursor(7,y);d.print(ln.text);if(sel)d.drawRect(4,y-2,232,15,c.border);y+=16;}
+  for(int row=0;row<BROWSER_VISIBLE;++row){
+    const int i=offset+row;
+    const bool populated=i<ctx.browser.lineCount();
+    const BrowserLine *ln=populated?&ctx.browser.lineAt(i):nullptr;
+    const bool sel=ln && ln->link>=0 && ln->link==selectedLink;
+    const uint16_t bg=sel?c.selected:c.bg;
+    d.fillRect(0,y-2,240,16,bg);
+    if(ln){
+      d.setTextColor(ln->link>=0?0x05FF:c.text,bg);
+      d.setCursor(7,y);d.print(ln->text);
+      if(sel)d.drawRect(4,y-2,232,15,c.border);
+    }
+    y+=16;
+  }
+  d.fillRect(0,272,240,26,c.bg);
   ctx.ui.scrollbar(ctx.browser.lineCount(),BROWSER_VISIBLE,offset,64,278);
   ctx.ui.softkeys("Options",selectedLink>=0?"Open":"","Back");
 }

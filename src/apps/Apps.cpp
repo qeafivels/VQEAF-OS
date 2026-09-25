@@ -1,4 +1,5 @@
 #include "Apps.h"
+#include "InstallerMenuPolicy.h"
 #include "../core/BuildVersion.h"
 #include "BoardConfig.h"
 #include "../core/QeappIconBlit.h"
@@ -2011,9 +2012,11 @@ static constexpr int INSTALLER_OPT_COUNT = 7;
 static const char *const *installerOptions(bool installedTab, bool details,
                                             bool verified, bool match, bool update) {
   if(installedTab) return INSTALLER_OPTS_INSTALLED;
-  if(details && verified && match && !update) return INSTALLER_OPTS_OPEN;
-  if(details && verified && update) return INSTALLER_OPTS_UPDATE;
-  return INSTALLER_OPTS_DEFAULT;
+  switch(InstallerMenuPolicy::primary(installedTab,details,verified,match,update)){
+    case InstallerMenuPolicy::Primary::Open: return INSTALLER_OPTS_OPEN;
+    case InstallerMenuPolicy::Primary::Update: return INSTALLER_OPTS_UPDATE;
+    default: return INSTALLER_OPTS_DEFAULT;
+  }
 }
 static int installerOptionCount(bool installedTab) {
   return installedTab ? INSTALLER_OPT_COUNT + 1 : INSTALLER_OPT_COUNT;
@@ -2252,7 +2255,7 @@ ScreenId AppInstallerApp::handle(AppContext &ctx,const KeyEvent &e){
      if(choice==0){selectedPath="";openDetails(ctx);}
      if(choice==1){
        if(!details){selectedPath="";openDetails(ctx);}
-       if(verified && (installedTab || (installedMatch && !willUpdate))){
+       if(InstallerMenuPolicy::canOpen(installedTab,verified,installedMatch,willUpdate)){
          // The installed catalog is reverified by PackageApp before launch.
          ctx.pendingPackageId=selectedMeta.id;
          return ScreenId::PackageApp;
@@ -2289,7 +2292,7 @@ ScreenId AppInstallerApp::handle(AppContext &ctx,const KeyEvent &e){
    if(e.key==Key::Option){popup.show();drawPopup(ctx,popup,installerOptions(installedTab,details,verified,installedMatch,willUpdate),
                       installerOptionCount(installedTab));return ScreenId::AppInstaller;}
    if(e.key==Key::Start||e.key==Key::Select){
-     if(verified&&(installedTab||(installedMatch&&!willUpdate))){
+     if(InstallerMenuPolicy::canOpen(installedTab,verified,installedMatch,willUpdate)){
        ctx.pendingPackageId=selectedMeta.id;return ScreenId::PackageApp;
      }
      if(verified&&installAllowed){confirm=true;confirmData=false;confirmChoice=1;draw(ctx);}

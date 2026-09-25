@@ -53,3 +53,35 @@ pio run -e vqeaf_lua_beta
 - Trên ESP32-S3 thật: log Serial 115200 từ boot; chụp hình icon 32×32 ở App Installer + Applications; xác nhận cài và mở đúng app do **cùng khóa** ký; thử Back Yes/No, reboot 100 lần, chạy ≥10 phút, app nguồn sai, key sai, copy lỗi SD, thẻ bị tháo, WiFi, màu RGB565, OOM, timeout, FPS và thời gian phím.
 
 **Giới hạn an toàn:** việc xác minh lại source sau `get()` giảm rủi ro thay đổi file nhưng SD/FAT vẫn có race vật lý khó triệt tiêu. Beta runtime không phải sandbox đa người dùng hoặc bộ chứng thực phần mềm tin cậy. Việc nâng cấp không bảo đảm chạy toàn bộ ứng dụng được Studio hỗ trợ trong tương lai; API ngoài danh sách hiện chưa triển khai.
+
+
+## Kiểm thử CI đã xác minh (trên GitHub, chưa phải thiết bị thật)
+
+- [QEAPP Studio Lua beta CI #36133221541](https://github.com/qeafivels/VQEAF-OS/actions/runs/36133221541): **PASS** toàn bộ bước gồm khóa ký kép/parser/installer stock/Back r2, xác minh nguồn Lua 5.4.8, chạy Lua VM thật trên host, build PlatformIO cả firmware stock `vqeaf_os` và beta `vqeaf_lua_beta` với khóa beta CI tạm.
+- [Stock PlatformIO CI #36133221555](https://github.com/qeafivels/VQEAF-OS/actions/runs/36133221555): **PASS**. Chạy trên branch `feat/qeapp-lua-compat-v251`, commit `ab68bd0`.
+- Artifact beta CI **chỉ chứng minh biên dịch**: được provision với khóa thử nghiệm **khác** khóa riêng của bạn và không thể xác minh gói Lua mà bạn đã ký. Không lấy artifact CI này để thay thế firmware cá nhân.
+
+## Tạo gói beta .img tương thích khóa ứng dụng của bạn (tùy chọn)
+
+Chỉ thực hiện **trên PC cá nhân**, sau khi đã chạy test, bootstrap nguồn Lua chính thức và provision từ **đúng PEM** dùng ký gói. Trên Windows PowerShell:
+
+```powershell
+# Đang ở checkout VQEAF-OS nhánh feat/qeapp-lua-compat-v251.
+# Chỉ provision MỘT LẦN nếu header beta chưa tồn tại:
+py -3 tools/provision_lua_beta_key.py --existing-private "D:\\SecureKeys\\qeapp_private.pem"
+pio run -e vqeaf_lua_beta
+
+# Tạo ảnh Flash cài sạch chỉ chứa firmware beta đã ký tin cậy bởi public key của bạn:
+py -3 tools/build_factory_img.py --project-root . \
+  --build-dir .pio/build/vqeaf_lua_beta \
+  --output dist/VQEAF-OS_v251_LuaBeta_PERSONAL_factory.img
+py -3 tools/build_factory_img.py --verify-only \
+  --output dist/VQEAF-OS_v251_LuaBeta_PERSONAL_factory.img
+Get-FileHash dist/VQEAF-OS_v251_LuaBeta_PERSONAL_factory.img -Algorithm SHA256
+```
+
+Lưu ý: nếu đã provision rồi, **bỏ qua lệnh provision** (tool cố ý từ chối ghi đè). Không bao giờ commit `QeappTrustKeyLuaBeta.h` tùy chỉnh hoặc PEM riêng, đưa chúng lên GitHub Actions hay chia sẻ bản firmware cá nhân khi chưa quản lý quyền ký.
+
+**CẢNH BÁO MẤT DỮ LIỆU:** ảnh `PERSONAL_factory.img` là **16 MiB toàn bộ Flash** để cài mới, sẽ ghi đè NVS, OTA, LittleFS và dữ liệu trên Flash. Sao lưu đầy đủ và xác nhận phần cứng N16R8 trước khi ghi. Muốn giữ dữ liệu ứng dụng, dùng `pio run -e vqeaf_lua_beta -t upload --upload-port COM3` sau khi sao lưu và xác minh layout, **không** nạp factory IMG.
+
+Bước nghiệm thu còn thiếu: ảnh thực tế của icon trong App Installer/Applications, chạy đúng tệp `app_tpmc8i2i.qeapp` với cùng PEM, thao tác Back (Yes/No), SD/WiFi, Serial 115200, FPS và heap đo trên ESP32-S3 thật.

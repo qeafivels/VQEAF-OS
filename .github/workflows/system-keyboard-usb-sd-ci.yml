@@ -7,6 +7,7 @@ on:
       - 'src/**'
       - 'tools/test_system_keyboard_usb_sd.py'
       - 'tools/test_browser_keyboard_events.py'
+      - 'tools/test_installer_revisit_open.py'
       - 'platformio.ini'
       - '.github/workflows/system-keyboard-usb-sd-ci.yml'
 permissions:
@@ -24,6 +25,8 @@ jobs:
         run: python tools/test_system_keyboard_usb_sd.py
       - name: Execute browser virtual keyboard keys and notification delivery
         run: python tools/test_browser_keyboard_events.py
+      - name: Verify Open action for installed apps and games after relaunch
+        run: python tools/test_installer_revisit_open.py
       - name: Existing Qeafbrowser and Back/Lua frame structural regression
         run: |
           python tools/test_qeafbrowser_os.py

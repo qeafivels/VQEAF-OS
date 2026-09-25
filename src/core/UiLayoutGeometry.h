@@ -8,7 +8,18 @@ constexpr int TITLEBAR_H=27, DIVIDER_Y=27, CONTENT_TOP=28;
 constexpr int FOOTER_Y=298, FOOTER_H=22;
 constexpr int LIST_ROW_H=42, LIST_VISIBLE=6;
 constexpr int GRID_COLS=3, GRID_ROWS=4, GRID_W=78, GRID_H=66, ICON_BOX=36;
-constexpr int STATUS_ZONE_W=80, STATUS_ICON_W=11, STATUS_ICON_GAP=6, STATUS_RIGHT_PAD=6;
+// Scale actual WiFi/battery status glyphs to the 27px top bar.
+constexpr int STATUS_ZONE_W=80, STATUS_ICON_W=18, STATUS_ICON_H=16;
+constexpr int STATUS_ICON_GAP=5, STATUS_RIGHT_PAD=5, STATUS_ICON_Y=5;
+constexpr int STATUS_BATTERY_X=W-STATUS_RIGHT_PAD-STATUS_ICON_W;
+constexpr int STATUS_WIFI_X=STATUS_BATTERY_X-STATUS_ICON_GAP-STATUS_ICON_W;
+constexpr Rect STATUS_WIFI{STATUS_WIFI_X,STATUS_ICON_Y,STATUS_ICON_W,STATUS_ICON_H};
+constexpr Rect STATUS_BATTERY{STATUS_BATTERY_X,STATUS_ICON_Y,STATUS_ICON_W,STATUS_ICON_H};
+static_assert(STATUS_WIFI_X>=STATUS_ZONE_W*2, "status icons overlap center clock zone");
+static_assert(STATUS_WIFI.right()+STATUS_ICON_GAP<=STATUS_BATTERY.x, "status glyphs overlap");
+static_assert(STATUS_BATTERY.right()+STATUS_RIGHT_PAD<=W, "status glyph exceeds screen");
+static_assert(STATUS_WIFI.y>=0 && STATUS_BATTERY.bottom()<TITLEBAR_H-2,
+              "status glyph clips titlebar divider");
 constexpr Rect HEADER{0,0,W,TITLEBAR_H}, DIVIDER{0,DIVIDER_Y,W,1};
 constexpr Rect CONTENT{0,CONTENT_TOP,W,FOOTER_Y-CONTENT_TOP};
 constexpr Rect FOOTER{0,FOOTER_Y,W,FOOTER_H};

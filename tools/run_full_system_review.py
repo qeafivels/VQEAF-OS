@@ -80,6 +80,7 @@ compile_command=[
   "tools/host_stubs/host_globals.cpp",
   "-o",str(O/"system_raster")]
 gates=[
+  ("statusbar_18px_raster_geometry",[sys.executable,"tools/test_statusbar_icons.py"]),
   ("compile_real_cpp_gui_and_keyboard",compile_command),
   ("capture_real_cpp_qwerty_and_notifications",[O/"system_raster",str(P)+"/"]),
   ("reference_rgb565_layout_and_glyph_tests",[sys.executable,"tools/test_ui_v23.py"]),

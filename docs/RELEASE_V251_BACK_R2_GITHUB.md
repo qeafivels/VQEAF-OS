@@ -2,7 +2,7 @@
 
 **Phạm vi:** nâng cấp lõi theo gói `VQEAF_OS_v251_Back_r2_Device_Test_Candidate_Full_Source.zip`, giữ nguyên toàn bộ tài nguyên và mã renderer so với gói gốc v2.5.1 khi bổ sung Back r2. Cập nhật v2.5.1 trước Back r2 có các sửa đổi icon/hiệu năng riêng so với v2.4.2.
 
-**Phiên bản xuất bản:** nhánh `release/v2.5.1-back-r2`, chưa xác nhận là firmware phát hành lên ESP32-S3 thật. Không đưa mã QEAPP-Studio vào repository OS.
+**Phiên bản xuất bản:** `main` và nhánh bảo lưu `release/v2.5.1-back-r2` (source release candidate). Hai bộ kiểm thử [host regression](https://github.com/qeafivels/VQEAF-OS/actions/runs/36116256896) và [PlatformIO ESP32-S3](https://github.com/qeafivels/VQEAF-OS/actions/runs/36116252602) đều PASS ở commit `512a51a`; build CI đã tạo artifact `firmware.bin`. **Chưa có kiểm thử trên ESP32-S3 vật lý**. Studio được tách riêng tại `qeafivels/QEAPP-Studio`.
 
 ## Các mốc phiên bản
 - v2.4.3: hồi quy installer, keyboard và theme.
@@ -19,10 +19,10 @@ Gói Back r2 thêm bốn tệp: `src/core/OsBackConfirm.h`, `tools/backguard_hos
 - `python tools/verify_v251.py`: **8/8 giai đoạn PASS** trên PC (RGB565, bộ đo, parser tổng hợp, chữ ký, kiểm tra fallback).
 - `python -m compileall -q tools`: PASS.
 - Upload Git: đối chiếu Git blob cho **592/592** tệp có mặt trong ZIP r2 (ngoại trừ README đã cập nhật riêng), bảo toàn 10 tệp chỉ có ở nhánh `main`, bao gồm CI, hợp đồng Studio và tài liệu lịch sử.
-- `pio run -e vqeaf_os`: **chưa thực hiện tại máy dùng để chuẩn bị release** do thiếu PlatformIO toolchain; xem [CI](https://github.com/qeafivels/VQEAF-OS/actions) để biết kết quả build từ GitHub.
+- `pio run -e vqeaf_os`: **PASS trên GitHub Actions** tại commit `512a51a`, tạo artifact firmware; **không** phải build hay nạp thiết bị tại máy xử lý tài liệu. Xem [CI](https://github.com/qeafivels/VQEAF-OS/actions/runs/36116252602).
 - ESP32-S3, LCD ST7789, SD, WiFi, phím bấm, FPS thực và thời gian phản hồi: **CHƯA KIỂM TRA trên thiết bị thật**.
 
-## Kiểm thử bắt buộc trước khi hợp nhất vào main
+## Kiểm thử bắt buộc trước khi phát hành cho thiết bị thật
 ```bash
 python tools/test_backguard_v251.py
 python tools/verify_v251.py
@@ -39,7 +39,7 @@ Test Snake/Browser/Music/Gallery: Back nội bộ giữ nguyên hành vi; chỉ 
 - Firmware và đồ họa: `qeafivels/VQEAF-OS`.
 - Studio và hai ứng dụng mẫu: `qeafivels/QEAPP-Studio`.
 
-**Không sửa `main` hoặc phát hành firmware.bin chỉ dựa trên host tests.**
+**Mã nguồn đã tích hợp `main` sau khi CI host và PlatformIO PASS. Không quảng bá firmware.bin thành bản ổn định cho thiết bị khi chưa xác minh LCD, phím, lưu trữ, WiFi và các thao tác Back thực tế.**
 
 ## CI PlatformIO: Arduino FS header discovery
 

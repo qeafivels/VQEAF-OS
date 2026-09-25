@@ -4,7 +4,7 @@
 
 **IDE phát triển ứng dụng được tách riêng:** [QEAPP-Studio](https://github.com/qeafivels/QEAPP-Studio). Không đưa `studio/`, máy ảo Lua PC hoặc các dự án mẫu Studio trở lại repository OS.
 
-> **Nhánh phát hành thử nghiệm:** [`release/v2.5.1-back-r2`](https://github.com/qeafivels/VQEAF-OS/tree/release/v2.5.1-back-r2) tích hợp mã nguồn v2.5.1 và bản sửa lõi xác nhận Back r2. Giao diện/đồ họa của bản v2.5.1 giữ nguyên so với gói trước Back. Đã kiểm thử host; build PlatformIO và ESP32-S3 thực tế được theo dõi độc lập tại GitHub Actions. Bản này là **source release candidate**, không phải xác nhận đã nạp thành công lên thiết bị. Xem [ghi chú phát hành r2](docs/RELEASE_V251_BACK_R2_GITHUB.md).
+> **Mã nguồn hiện tại trên `main`: VQEAF-OS v2.5.1 + Back r2.** Host regression và **build PlatformIO ESP32-S3 trên GitHub Actions** đã PASS, có artifact firmware từ CI. **Chưa kiểm thử trực tiếp** LCD, phím, SD, WiFi hay FPS trên thiết bị. Giữ nguyên giao diện, icon, theme và renderer của v2.5.1 khi bổ sung Back r2. Xem [ghi chú phát hành](docs/RELEASE_V251_BACK_R2_GITHUB.md) và [build CI đã PASS](https://github.com/qeafivels/VQEAF-OS/actions/runs/36116252602).
 
 ## Phần cứng mục tiêu
 

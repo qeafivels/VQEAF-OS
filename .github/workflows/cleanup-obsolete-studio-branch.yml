@@ -1,0 +1,36 @@
+name: One-time cleanup of migrated Studio branch
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/cleanup-obsolete-studio-branch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  remove-old-studio-branch:
+    if: github.repository == 'qeafivels/VQEAF-OS'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify migration and delete only the obsolete branch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_OLD_SHA: 83d68ee3f2bf1680fe47bcff7dfcc958ef571c3a
+          VERIFIED_STUDIO_SHA: 78d6560492d8c5a0cb76dd89001b79ccdfa25275
+        run: |
+          set -euo pipefail
+          actual=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/feat/qeapp-studio-samples-v074" --jq '.object.sha')
+          studio=$(gh api repos/qeafivels/QEAPP-Studio/git/ref/heads/main --jq '.object.sha')
+          if [[ "$actual" != "$EXPECTED_OLD_SHA" ]]; then
+            echo "Ref moved since review: $actual; declining deletion"
+            exit 1
+          fi
+          if [[ "$studio" != "$VERIFIED_STUDIO_SHA" ]]; then
+            echo "Studio repository ref moved; re-verify before deleting old branch"
+            exit 1
+          fi
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/feat/qeapp-studio-samples-v074"
+          echo "Obsolete feature branch deleted; historical merged commits remain intact."

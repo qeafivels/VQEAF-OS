@@ -375,7 +375,13 @@ static void enterScreen(ScreenId s, bool animate = true, bool resume = false) {
 #else
   const bool heavyRoute = from==ScreenId::AppInstaller || s==ScreenId::AppInstaller ||
        from==ScreenId::Applications || s==ScreenId::Applications ||
-       s==ScreenId::Browser || s==ScreenId::TextViewer;
+       s==ScreenId::Browser || s==ScreenId::TextViewer
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+       // Never play LCD-wide wipe/interstitial while a Lua sprite is active.
+       // It is composited separately and cannot participate in transitionOut.
+       || from==ScreenId::LuaApp || s==ScreenId::LuaApp
+#endif
+       ;
 #endif
   if (animate && !heavyRoute && from != ScreenId::Launcher && s != ScreenId::Launcher &&
       from != ScreenId::Explorer && s != ScreenId::Explorer &&
@@ -396,7 +402,10 @@ static void enterScreen(ScreenId s, bool animate = true, bool resume = false) {
   // Avoid a physical blank frame on Back-cancel when resuming the SAME VM.
   if (s != ScreenId::Idle && s != ScreenId::Lock && s != ScreenId::Splash
 #if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
-      && !(s == ScreenId::LuaApp && from == ScreenId::LuaApp && resume)
+      // Lua paints its entire viewport offscreen and pushes the completed
+      // first frame. Do not expose a cleared LCD while that callback runs,
+      // either at launch or when dismissing the Back confirmation.
+      && s != ScreenId::LuaApp
 #endif
       ) ui.clearContent();
   switch (s) {

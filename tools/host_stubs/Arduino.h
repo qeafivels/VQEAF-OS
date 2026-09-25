@@ -59,3 +59,6 @@ class SerialClass { public: void begin(int){} template<class...A> void printf(co
 extern SerialClass Serial;
 class ESPClass { public: uint32_t getFreeHeap() const{return 200000;} uint32_t getFreePsram() const{return 8000000;} uint32_t getMinFreeHeap() const{return 100000;} uint32_t getPsramSize() const{return 8000000;} void restart(){} };
 extern ESPClass ESP;
+
+// Host-only compile shim: no emulator claim about a physical XTensa CPU PLL.
+inline unsigned getCpuFrequencyMhz(){return 240u;}

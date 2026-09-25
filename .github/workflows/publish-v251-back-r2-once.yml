@@ -1,0 +1,95 @@
+# Temporary one-shot release publisher. Remove after a verified release.
+name: Publish v2.5.1 Back r2 pre-release
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-v251-back-r2-once.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  release:
+    if: github.repository == 'qeafivels/VQEAF-OS'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: v2.5.1-back-r2
+      TARGET_SHA: 512a51a7ab0ae57f5ce4c56ded47ad6f06612d9e
+      CI_RUN_ID: '36118874784'
+      CI_ARTIFACT_ID: '10856212759'
+      EXPECTED_ARTIFACT_SHA256: 7184f79147b9a4123dbe23be480ecb205fbcd1c4c6ae10ae9224a515c7f03685
+      EXPECTED_FIRMWARE_SHA256: e68c66fc1200ee3ae897a3fe91c19c4ee366fd39f5880cb6de66924e486e5c87
+      EXPECTED_PARTITIONS_SHA256: bd0f7954aca2ef7d925ee21aaa1f3dc8822d1d6ce5cbbd26a135e5886bfff6ce
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify CI provenance and check for existing release
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sha=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CI_RUN_ID}" --jq '.head_sha')
+          ci_conclusion=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CI_RUN_ID}" --jq '.conclusion')
+          if [[ "$actual_sha" != "$TARGET_SHA" || "$ci_conclusion" != "success" ]]; then
+            echo "ERROR: artifact build SHA/result does not match the audited source" >&2
+            exit 1
+          fi
+          artifact_run=$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${CI_ARTIFACT_ID}" --jq '.workflow_run.head_sha')
+          if [[ "$artifact_run" != "$TARGET_SHA" ]]; then
+            echo "ERROR: artifact provenance mismatch" >&2
+            exit 1
+          fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "ERROR: release already exists. Review before trying to overwrite it." >&2
+            exit 1
+          fi
+          if git ls-remote --tags origin "refs/tags/$TAG" | grep -q .; then
+            echo "ERROR: release tag already exists. Review before reuse." >&2
+            exit 1
+          fi
+
+      - name: Download exactly the verified original CI artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${CI_ARTIFACT_ID}/zip" \
+            -o "out/VQEAF-OS_v2.5.1_Back-r2_CI-artifact.zip"
+          echo "$EXPECTED_ARTIFACT_SHA256  out/VQEAF-OS_v2.5.1_Back-r2_CI-artifact.zip" | sha256sum --check -
+          unzip -tqq "out/VQEAF-OS_v2.5.1_Back-r2_CI-artifact.zip"
+          unzip -p "out/VQEAF-OS_v2.5.1_Back-r2_CI-artifact.zip" ".pio/build/vqeaf_os/firmware.bin" > "out/VQEAF-OS_v2.5.1_Back-r2_firmware.bin"
+          unzip -p "out/VQEAF-OS_v2.5.1_Back-r2_CI-artifact.zip" ".pio/build/vqeaf_os/partitions.bin" > "out/VQEAF-OS_v2.5.1_Back-r2_partitions.bin"
+          [[ $(stat -c%s "out/VQEAF-OS_v2.5.1_Back-r2_firmware.bin") -eq 1503984 ]]
+          [[ $(stat -c%s "out/VQEAF-OS_v2.5.1_Back-r2_partitions.bin") -eq 3072 ]]
+          [[ $(od -An -tx1 -N1 "out/VQEAF-OS_v2.5.1_Back-r2_firmware.bin" | tr -d ' \n') == "e9" ]]
+          echo "$EXPECTED_FIRMWARE_SHA256  out/VQEAF-OS_v2.5.1_Back-r2_firmware.bin" | sha256sum --check -
+          echo "$EXPECTED_PARTITIONS_SHA256  out/VQEAF-OS_v2.5.1_Back-r2_partitions.bin" | sha256sum --check -
+          (
+            cd out
+            sha256sum VQEAF-OS_v2.5.1_Back-r2_firmware.bin \
+                      VQEAF-OS_v2.5.1_Back-r2_partitions.bin \
+                      VQEAF-OS_v2.5.1_Back-r2_CI-artifact.zip > SHA256SUMS.txt
+          )
+
+      - name: Create Vietnamese GitHub pre-release and attach build artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            "out/VQEAF-OS_v2.5.1_Back-r2_firmware.bin" \
+            "out/VQEAF-OS_v2.5.1_Back-r2_partitions.bin" \
+            "out/VQEAF-OS_v2.5.1_Back-r2_CI-artifact.zip" \
+            "out/SHA256SUMS.txt" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$TARGET_SHA" \
+            --title "VQEAF-OS v2.5.1 + Back r2 (Bản thử nghiệm)" \
+            --notes-file docs/RELEASE_NOTES_GITHUB_V251_BACK_R2_VN.md \
+            --prerelease
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url,assets,isPrerelease,tagName

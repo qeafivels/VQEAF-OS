@@ -28,6 +28,14 @@ Giao diện Home/Menu, icon pixel RGB565/RLE, các theme và logic renderer thu�
 
 **Khả năng tương thích:** firmware `vqeaf_os` mặc định chỉ chạy những loại QEAPP/2 đã hỗ trợ, được ký bởi khóa đáng tin cậy. Nó **không** thực thi ứng dụng Symbian SIS, MRE/VXP, hay Lua beta từ Studio như ứng dụng native một cách tự động. Không tắt bước kiểm tra chữ ký để thử ứng dụng.
 
+## Gói cài mặc định dạng `.img` cho cài mới
+
+**N16R8 factory installer:** phát hành tệp `VQEAF-OS_v2.5.1_Back-r2_factory.img` (16 MiB) ở [Release v2.5.1 + Back r2](https://github.com/qeafivels/VQEAF-OS/releases/tag/v2.5.1-back-r2). Ảnh đã ghép bootloader, bảng phân vùng, Arduino boot_app0 và firmware; checksum và layout đi kèm.
+
+**CẢNH BÁO:** ảnh `.img` là **bản cài sạch phá hủy dữ liệu**: sẽ ghi đè NVS, OTA slot, LittleFS và coredump. Chỉ nạp từ offset `0x0` lên board ESP32-S3 N16R8 **sau khi sao lưu toàn bộ Flash 16 MiB**. Không dùng như một gói `.qeapp`, ảnh thẻ SD, OTA hay cập nhật thông thường. Nếu đang sử dụng OS và muốn giữ dữ liệu, hãy build/upload profile `vqeaf_os` qua PlatformIO, không ghi toàn bộ `.img`. Chưa có kiểm thử trên phần cứng thật.
+
+**[Hướng dẫn cài, kiểm tra SHA-256 và tự đóng gói IMG](docs/FACTORY_IMG_INSTALL_V251_VN.md)** · Script: `tools/build_factory_img.py`; bộ test an toàn: `tools/test_factory_img.py`.
+
 ## Build trên máy phát triển
 
 Cần [PlatformIO](https://platformio.org/) và bộ công cụ ESP32 tương thích:

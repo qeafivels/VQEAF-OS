@@ -810,6 +810,10 @@ static void reportUiPerformanceIfDue() {
      (unsigned long)heap_caps_get_free_size(MALLOC_CAP_8BIT),
      (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
      (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+  // Actual CPU frequency is sampled on the MCU, not inferred from host FPS.
+  // 240 MHz is only the configured target and does not prove no throttling.
+  Serial.printf("[VQEAF][CLOCK] target_mhz=240 observed_mhz=%lu uptime_ms=%lu\n",
+                (unsigned long)getCpuFrequencyMhz(),(unsigned long)now);
 }
 #endif
 

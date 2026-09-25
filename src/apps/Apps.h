@@ -360,6 +360,7 @@ private:
   int count = 0, index = 0, offset = 0;
   bool installedTab = false, details = false, confirm = false, verified = false;
   bool willUpdate = false, installAllowed = false, confirmData = false;
+  bool installedMatch = false; // signed package already has a verified installed counterpart
   String previousVersion;
   bool operationResultOpen = false;
   String operationResultTitle;

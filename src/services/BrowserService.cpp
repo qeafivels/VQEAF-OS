@@ -930,12 +930,25 @@ void BrowserService::parseHtml(const char *src, size_t len) {
     while (*t && !isspace((unsigned char)*t) && *t!='>' && *t!='/' && n<19) name[n++]=*t++;
     name[n]=0;
 
-    if (!strcmp(name,"script") || !strcmp(name,"style") || !strcmp(name,"noscript") || !strcmp(name,"svg")) {
+    if (!strcmp(name,"script") || !strcmp(name,"style") || !strcmp(name,"noscript") ||
+        !strcmp(name,"svg") || !strcmp(name,"template") || !strcmp(name,"iframe") ||
+        !strcmp(name,"object") || !strcmp(name,"canvas")) {
       skip = !closing; return;
     }
     if (skip) return;
     if (!strcmp(name,"title")) { inTitle = !closing; return; }
-    if (!strcmp(name,"a")) {
+    if (!closing && !strcmp(name,"card") && !pageTitle[0]) {
+      char cardTitle[64]={0};
+      if(htmlAttr(raw,"title",cardTitle,sizeof(cardTitle)) && cardTitle[0])
+        snprintf(pageTitle,sizeof(pageTitle),"%s",cardTitle);
+    }
+    // WML <anchor> wraps its label and nested <go href="..."/> provides target.
+    if (!closing && !strcmp(name,"go") && inAnchor) {
+      char goHref[192]={0};
+      if(htmlAttr(raw,"href",goHref,sizeof(goHref))) strcpy(anchorHref,goHref);
+      return;
+    }
+    if (!strcmp(name,"a") || !strcmp(name,"anchor")) {
       if (!closing) {
         inAnchor = true; anchorN = 0; anchorText[0] = 0; anchorHref[0] = 0;
         htmlAttr(raw, "href", anchorHref, sizeof(anchorHref));

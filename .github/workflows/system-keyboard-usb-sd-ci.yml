@@ -9,6 +9,8 @@ on:
       - 'tools/test_browser_keyboard_events.py'
       - 'tools/test_installer_revisit_open.py'
       - 'tools/test_statusbar_icons.py'
+      - 'tools/vqeaf_host/**'
+      - 'tools/host_stubs/**'
       - 'platformio.ini'
       - '.github/workflows/system-keyboard-usb-sd-ci.yml'
 permissions:

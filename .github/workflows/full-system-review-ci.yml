@@ -38,6 +38,8 @@ jobs:
             preview/browser_keyboard_focus.png
             preview/wifi_keyboard_masked.png
             preview/system_notifications.png
+            preview/installer_revisit_open.png
+            preview/installed_apps_open_menu.png
             build_reports/system_full/
           if-no-files-found: warn
       - name: Build default complete OS for ESP32-S3 N16R8

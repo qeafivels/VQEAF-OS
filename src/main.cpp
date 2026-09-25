@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include "core/BuildVersion.h"
 #include <TFT_eSPI.h>
 #include <WiFi.h>
 #include <time.h>
@@ -8,6 +9,10 @@
 #include "core/Types.h"
 #include "core/InputManager.h"
 #include "core/SymbianUI.h"
+#if defined(VQEAF_PERF_DIAG)
+#include "core/UiPerfCounter.h"
+#include "core/UiFrameMetrics.h"
+#endif
 #if defined(VQEAF_ICON_SELFTEST)
 #include "core/VqeafIconSelfTest.h"
 #endif
@@ -22,6 +27,8 @@
 #include "services/BoardDiagnostics.h"
 #include "services/TrustedTls.h"
 #include "services/ThemeFileService.h"
+#include "core/GlobalShortcutPolicy.h"
+#include "core/OsBackConfirm.h"
 #include "services/AppInstallerService.h"
 #include "services/QeappDataService.h"
 #include "apps/Apps.h"
@@ -87,6 +94,7 @@ static String lastIdleWiFiText;
 static bool lastIdleWiFiConnected = false;
 static uint32_t lastIdleWiFiRefresh = 0;
 static uint32_t lastAppWifiBadgeRefresh = 0;
+static OsBackConfirm osBackConfirm;
 
 static bool wifiConnected() { return WiFi.status() == WL_CONNECTED; }
 
@@ -175,24 +183,39 @@ static bool shouldShowOpening(ScreenId from, ScreenId to) {
 }
 
 static void enterScreen(ScreenId s, bool animate = true, bool resume = false) {
+#if defined(VQEAF_PERF_DIAG)
+  const uint32_t navStartUs=micros();
+#endif
   ScreenId from = screen;
+  // Forced navigation (card removal/auto-lock/etc.) must invalidate a pending
+  // confirmation so it can never confirm a stale app after the new screen loads.
+  if (s != from && osBackConfirm.active()) osBackConfirm.cancel();
   // A mere WiFi-list browse must not permanently disable saved-AP recovery;
   // explicit manual Connect/Disconnect still takes priority.
   if (from == ScreenId::WiFi && s != ScreenId::WiFi) {
     wifiConnection.resumeAutoAfterBrowsing();
   }
   String packageOpeningName;
+  String launchFeedback;
   if (s == ScreenId::PackageApp) {
     Qeapp::Meta meta;
-    if (!appInstaller.get(appCtx.pendingPackageId, meta)) {
-      notifications.push("Applications", "Installed application unavailable");
+    String launchFailure;
+    if (!appInstaller.get(appCtx.pendingPackageId, meta, &launchFailure)) {
+      Serial.printf("[VQEAF][QEAPP][LAUNCH_FAIL] id=%s reason=%s\n",
+                    appCtx.pendingPackageId.c_str(),launchFailure.c_str());
+      notifications.push("Applications", launchFailure);
+      launchFeedback=launchFailure;
       s = ScreenId::Applications;
     } else {
       packageOpeningName = meta.name;
       appCtx.pendingPackageLaunch = true;
       if (!strcmp(meta.id, "snake_pixel") && !strcmp(meta.type, "text")) {
         if (pixelSnakeApp.enter(appCtx)) s = ScreenId::Snake;
-        else { notifications.push("Pixel Snake", "Invalid signed game settings"); s = ScreenId::Applications; }
+        else {
+          launchFeedback="Game settings invalid (signed demo required)";
+          notifications.push("Pixel Snake", launchFeedback);
+          s = ScreenId::Applications;
+        }
         // Browser and Text Viewer normally consume this flag. Snake does not.
         appCtx.pendingPackageLaunch = false;
       } else if (!strcmp(meta.type, "web")) {
@@ -216,16 +239,29 @@ static void enterScreen(ScreenId s, bool animate = true, bool resume = false) {
 
   if (from == ScreenId::Launcher || s == ScreenId::Launcher ||
       from == ScreenId::Explorer || s == ScreenId::Explorer) ui.invalidateChrome();
-  if (animate && from != ScreenId::Launcher && s != ScreenId::Launcher &&
+#if defined(VQEAF_V250_NAV_COMPAT)
+  // Diagnostic A/B: old transition policy, SAME v2.5.1 code and profiler.
+  const bool heavyRoute=false;
+#else
+  const bool heavyRoute = from==ScreenId::AppInstaller || s==ScreenId::AppInstaller ||
+       from==ScreenId::Applications || s==ScreenId::Applications ||
+       s==ScreenId::Browser || s==ScreenId::TextViewer;
+#endif
+  if (animate && !heavyRoute && from != ScreenId::Launcher && s != ScreenId::Launcher &&
       from != ScreenId::Explorer && s != ScreenId::Explorer &&
       screen != ScreenId::Splash && s != ScreenId::Lock) ui.transitionOut();
-  if (animate && shouldShowOpening(from, s) && s != ScreenId::Recovery) {
+  if (animate && !heavyRoute && shouldShowOpening(from, s) && s != ScreenId::Recovery) {
     ui.chrome("Opening", wifiConnected(), false, false, settings.data().hour12);
     ui.openingApp(packageOpeningName.length() ? packageOpeningName : SystemService::screenName(s),
                   packageOpeningName.length() ? "App" : SystemService::screenIcon(s), resume);
-    delay(170);
+    // Keep interstitial visible without a 170ms input/audio service stall.
+    delay(32);
   }
 
+  if (from == ScreenId::Files && (s == ScreenId::Themes || s == ScreenId::AppInstaller)) {
+    Serial.printf("[VQEAF][FILE] %s => %s\n", s == ScreenId::Themes ? "VQEAF" : "QEAPP",
+                  s == ScreenId::Themes ? "Themes" : "App installer");
+  }
   screen = s;
   if (s != ScreenId::Idle && s != ScreenId::Lock && s != ScreenId::Splash) ui.clearContent();
   switch (s) {
@@ -264,7 +300,14 @@ static void enterScreen(ScreenId s, bool animate = true, bool resume = false) {
     case ScreenId::Themes:
       if (!resume) themesApp.enter(appCtx, from); themesApp.draw(appCtx); break;
     case ScreenId::Applications:
-      if (!resume) applicationsApp.enter(appCtx); applicationsApp.draw(appCtx); break;
+      if (!resume) applicationsApp.enter(appCtx);
+      applicationsApp.draw(appCtx);
+      if (launchFeedback.length()) {
+        ui.message("Cannot open QEAPP",launchFeedback.substring(0,32),
+                   launchFeedback.substring(32,64),"Rescan or reinstall signed app");
+        ui.softkeys("","","Back");
+      }
+      break;
     case ScreenId::AppInstaller:
       if (!resume) appInstallerApp.enter(appCtx, from); appInstallerApp.draw(appCtx); break;
     case ScreenId::QuickPanel:
@@ -299,13 +342,30 @@ static void enterScreen(ScreenId s, bool animate = true, bool resume = false) {
     }
     case ScreenId::About:
       ui.chrome("About", wifiConnected(), false, false, settings.data().hour12);
-      ui.message("VQEAF OS", "v2.4 App Manager", "ESP32-S3 / 240x320 portrait", "Browser, .vqeaf, .qeapp");
+      ui.message("VQEAF OS", VQEAF_OS_VERSION_TEXT, "ESP32-S3 / 240x320 portrait", "Browser, .vqeaf, .qeapp");
       ui.softkeys("", "", "Back");
       break;
     default: break;
   }
   systemService.recordScreen(s);
   lastClockRefresh = millis();
+#if defined(VQEAF_PERF_DIAG)
+  vqeafFrameMetrics.navigation(UiFrameMetrics::elapsed(micros(),navStartUs));
+#endif
+
+}
+
+// Presentation deliberately delegates to the OLD renderer/old theme.
+// No changes to src/core/SymbianUI.*, LauncherView or any art assets.
+static void paintSystemBackConfirm() {
+  ui.dialog("VQEAF OS", "Close application?", "", "Yes", "No", osBackConfirm.selected());
+  Serial.printf("[VQEAF][BACK] dialog selected=%d\n", osBackConfirm.selected());
+}
+
+static void redrawAfterSystemBackCancel() {
+  // Resuming an existing screen is essential: do not call app.enter(), which
+  // would reset Snake and discard Browser/Gallery/Music session state.
+  enterScreen(screen, false, true);
 }
 
 static void drawSplash() {
@@ -317,7 +377,7 @@ static void drawSplash() {
   d.setTextFont(1); d.setCursor(66,158); d.print("ESP32-S3 / 240x320");
   d.drawRect(25,205,190,12,c.dim);
   d.fillRect(27,207,160,8,c.accent);
-  d.setCursor(52,229); d.print("VQEAF OS v2.4.2");
+  d.setCursor(52,229); d.print(VQEAF_OS_VERSION_TEXT);
 }
 
 static ScreenId idleShortcutTarget() {
@@ -342,6 +402,7 @@ static void updateWirelessNotifications() {
     lastWifiConnected = connected;
     // Idle is anti-flicker: repaint only WiFi status line after a link change.
     if (screen == ScreenId::Idle) updateIdleWiFiStatus();
+    else if (osBackConfirm.active()) { /* Popup stays on top; next scene redraws badges. */ }
     else if (screen == ScreenId::Explorer) explorer.refreshStatus(appCtx);
     else if (screen == ScreenId::Launcher) ui.refreshWifiBadge(connected, settings.data().hour12);
     else if (screen != ScreenId::Splash && screen != ScreenId::Lock && !keyboard.active())
@@ -423,6 +484,7 @@ static void diagPoll() {
 void setup() {
   Serial.begin(115200);
   delay(200);
+  AppInstallerService::printBootInstallDiagnostics();
 #ifdef ARDUINO_ARCH_ESP32
   // Emit observable board/memory evidence to the 115200 serial capture.
   // USB CDC is enabled in platformio.ini; these checks only log, never
@@ -539,11 +601,54 @@ void setup() {
   if (systemService.safeMode()) notifications.push("Safe Mode", "WiFi auto-connect disabled");
 }
 
+#if defined(VQEAF_PERF_DIAG)
+static UiPerfCounter uiLoopPerf;
+struct UiLoopTimingProbe {
+  const uint32_t start;
+  UiLoopTimingProbe() : start(micros()) {}
+  ~UiLoopTimingProbe() { uiLoopPerf.record(UiPerfCounter::elapsed(micros(),start)); }
+};
+static void reportUiPerformanceIfDue() {
+  static uint32_t lastReportMs=0;
+  const uint32_t now=millis();
+  const uint32_t elapsedMs=now-lastReportMs;
+  if (elapsedMs<5000) return;
+  lastReportMs=now;
+  const auto perf=uiLoopPerf.take();
+  const auto frames=vqeafFrameMetrics.take(elapsedMs);
+  Serial.printf("[VQEAF][FPS] window_ms=%lu game_frames=%lu game_fps_x10=%lu "
+                "game_draw_avg_us=%lu game_draw_max_us=%lu game_draw_p95_le_us=%lu "
+                "nav_count=%lu nav_avg_us=%lu nav_max_us=%lu nav_p95_le_us=%lu "
+                "input_events=%lu input_dispatch_avg_us=%lu input_dispatch_max_us=%lu "
+                "input_dispatch_p95_le_us=%lu\n",
+       (unsigned long)frames.elapsedMs,(unsigned long)frames.game.count,
+       (unsigned long)frames.gameFpsX10(),(unsigned long)frames.game.meanUs(),
+       (unsigned long)frames.game.maxUs,(unsigned long)frames.game.p95UpperBoundUs(),
+       (unsigned long)frames.navigation.count,(unsigned long)frames.navigation.meanUs(),
+       (unsigned long)frames.navigation.maxUs,(unsigned long)frames.navigation.p95UpperBoundUs(),
+       (unsigned long)frames.input.count,(unsigned long)frames.input.meanUs(),
+       (unsigned long)frames.input.maxUs,(unsigned long)frames.input.p95UpperBoundUs());
+  Serial.printf("[VQEAF][PERF] samples=%lu avg_loop_us=%lu max_loop_us=%lu "
+                "over16=%lu over33=%lu over100=%lu heap8=%lu largest8=%lu psram=%lu\n",
+     (unsigned long)perf.samples, (unsigned long)perf.meanUs,
+     (unsigned long)perf.maxUs,(unsigned long)perf.over16ms,
+     (unsigned long)perf.over33ms,(unsigned long)perf.over100ms,
+     (unsigned long)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+     (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+     (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+}
+#endif
+
 void loop() {
+#if defined(VQEAF_PERF_DIAG)
+  // RAII captures ALL return paths, including idle/splash/locked display.
+  UiLoopTimingProbe probe;
+  reportUiPerformanceIfDue();
+#endif
   diagPoll();
   if (!systemService.safeMode()) {
     music.update();
-    musicApp.tick(appCtx, screen == ScreenId::Music);
+    musicApp.tick(appCtx, screen == ScreenId::Music && !osBackConfirm.active());
   }
   // Card presence probes are read-only and rate-limited. Do not end/remount
   // SD_MMC while a playing or paused WAV owns an open File handle.
@@ -569,9 +674,9 @@ void loop() {
     if (screen == ScreenId::Launcher) launcher.draw(appCtx);
     if (screen == ScreenId::Explorer) explorer.draw(appCtx);
   }
-  stopwatchApp.tick(appCtx, screen == ScreenId::Stopwatch);
-  if (screen == ScreenId::Snake) pixelSnakeApp.tick(appCtx);
-  galleryApp.tick(appCtx, screen == ScreenId::Gallery);
+  stopwatchApp.tick(appCtx, screen == ScreenId::Stopwatch && !osBackConfirm.active());
+  if (screen == ScreenId::Snake && !osBackConfirm.active()) pixelSnakeApp.tick(appCtx);
+  galleryApp.tick(appCtx, screen == ScreenId::Gallery && !osBackConfirm.active());
   wifiApp.tick(appCtx, screen == ScreenId::WiFi);
   systemService.update(notifications);
   updateWirelessNotifications();
@@ -579,7 +684,7 @@ void loop() {
   // Compact WiFi bars on a foreground app (including Launcher): cached
   // chrome refresh touches only the status strip, never the entire screen.
   if (screen != ScreenId::Idle && screen != ScreenId::Lock &&
-      screen != ScreenId::Splash && !keyboard.active() &&
+      screen != ScreenId::Splash && !keyboard.active() && !osBackConfirm.active() &&
       (uint32_t)(millis() - lastAppWifiBadgeRefresh) >= 5000UL) {
     if (screen == ScreenId::Explorer) explorer.refreshStatus(appCtx);
     else if (screen == ScreenId::Launcher) ui.refreshWifiBadge(wifiConnected(), settings.data().hour12);
@@ -602,6 +707,7 @@ void loop() {
       timeSyncedNotified = true;
       notifications.push("Clock synchronized", "Network time is available");
       if (screen == ScreenId::Idle) ui.idleClock(settings.data().hour12);
+      else if (osBackConfirm.active()) { /* Do not overwrite the modal popup. */ }
       else if (screen == ScreenId::Explorer) explorer.refreshStatus(appCtx);
       else if (screen == ScreenId::Launcher) ui.refreshWifiBadge(wifiConnected(), settings.data().hour12);
       else if (screen != ScreenId::Splash && screen != ScreenId::Lock && !keyboard.active())
@@ -638,6 +744,14 @@ void loop() {
   input.setTextInputActive(keyboard.active());
   KeyEvent e = input.poll();
   if (e.key == Key::None) { delay(4); return; }
+#if defined(VQEAF_PERF_DIAG)
+  // Measures from event delivery (input.poll) through dispatch/UI writes;
+  // it is NOT interrupt-to-photon latency on the physical LCD.
+  struct InputLatencyScope {
+    uint32_t started=micros();
+    ~InputLatencyScope(){vqeafFrameMetrics.inputDispatch(UiFrameMetrics::elapsed(micros(),started));}
+  } latencyScope;
+#endif
   lastActivityAt = millis();
 
   // Locked state consumes all keypad events before any global shortcut.
@@ -655,23 +769,41 @@ void loop() {
     return;
   }
 
-  // SELECT long press is always a mode toggle, even inside URL/WiFi editors.
-  if(e.pressed && e.longPress && e.key==Key::Select) {
-    Serial.printf("[key] mode: %s\n",input.t9Mode()?"T9":"GAME");
-    notifications.push("Input mode",input.t9Mode()?"T9 multi-tap":"Game navigation");
-    if(keyboard.active()) {
-      keyboard.draw(ui,wifiConnected(),false,storage.mounted(),settings.data().hour12);
+  // Modal input owns ALL keys before shortcuts and individual app dispatch.
+  // In particular, MENU must not switch screens behind the confirm dialog.
+  if (osBackConfirm.active()) {
+    const auto result = osBackConfirm.handle(e);
+    if (result == OsBackConfirm::Result::Repaint) paintSystemBackConfirm();
+    else if (result == OsBackConfirm::Result::Accepted) {
+      const ScreenId target = osBackConfirm.destination();
+      osBackConfirm.cancel();
+      Serial.printf("[VQEAF][BACK] accepted target=%d\n",int(target));
+      enterScreen(target);
+    } else if (result == OsBackConfirm::Result::Cancelled) {
+      osBackConfirm.cancel();
+      Serial.println("[VQEAF][BACK] cancelled; original app resumed");
+      redrawAfterSystemBackCancel();
     }
     return;
   }
-  // The on-screen text editor owns MENU/B/SELECT in Game input mode.
-  if (!keyboard.active() && e.pressed && e.longPress) {
-    if (e.key == Key::Menu)   { enterScreen(ScreenId::TaskSwitcher); return; }
-    if (e.key == Key::Option) { enterScreen(ScreenId::Settings); return; }
-    if (e.key == Key::Start)  { enterScreen(ScreenId::Music); return; }
-    if (e.key == Key::A)      { enterScreen(ScreenId::Recovery); return; }
-    if (e.key == Key::B)      { notifications.push("Keypad locked", "Locked by shortcut"); enterScreen(ScreenId::Lock, false); return; }
+
+  // MENU/SELECT are release-vs-hold gestures (see InputManager). Do not
+  // intercept a held START while an app/theme is opening: its earlier short
+  // click has ALREADY selected that package/theme, so a second transition to
+  // Music would interrupt installation or make Theme Manager appear blank.
+  const auto shortcut = GlobalShortcutPolicy::resolve(e, keyboard.active());
+  if (shortcut == GlobalShortcutPolicy::Action::ToggleT9) {
+    Serial.printf("[key] mode: %s\n",input.t9Mode()?"T9":"GAME");
+    notifications.push("Input mode",input.t9Mode()?"T9 multi-tap":"Game navigation");
+    if (keyboard.active()) keyboard.draw(ui,wifiConnected(),false,storage.mounted(),settings.data().hour12);
+    return;
   }
+  if (shortcut == GlobalShortcutPolicy::Action::TaskSwitcher) {
+    Serial.println("[VQEAF][KEY] MENU hold => Tasks");
+    enterScreen(ScreenId::TaskSwitcher);
+    return;
+  }
+  if (e.longPress) return; // an unassigned held key must not re-dispatch
 
   if (!keyboard.active() && e.pressed && !e.longPress && e.key == Key::Menu) {
     if (screen != ScreenId::Launcher) enterScreen(ScreenId::Launcher);
@@ -751,6 +883,13 @@ void loop() {
       break;
   }
   if (next != screen) {
+    // Only guard a TRUE exit; this runs after app-local Back was offered to
+    // the app (gallery preview, music player, installer confirmation, etc.).
+    if (osBackConfirm.begin(screen, next, e)) {
+      Serial.printf("[VQEAF][BACK] requested current=%d target=%d\n",int(screen),int(next));
+      paintSystemBackConfirm();
+      return;
+    }
     bool resumeTarget = false;
     if (screen == ScreenId::TaskSwitcher) resumeTarget = taskSwitcherApp.takeResumeRequest();
     if (screen == ScreenId::Themes && next == ScreenId::Files) resumeTarget = true;

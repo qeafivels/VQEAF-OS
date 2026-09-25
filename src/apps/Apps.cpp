@@ -1,5 +1,7 @@
 #include "Apps.h"
+#include "../core/BuildVersion.h"
 #include "BoardConfig.h"
+#include "../core/QeappIconBlit.h"
 #include <esp_heap_caps.h>
 
 // GCC 8 / GNU++11 needs definitions when class constexpr integers are odr-used
@@ -13,6 +15,10 @@ constexpr int TextViewerApp::MAX_DOCS;
 constexpr int TextViewerApp::PAGE_LINES;
 constexpr int TextViewerApp::PAGE_STACK;
 
+// One global 2 KiB UI scratch for Installer + Applications (mutually exclusive
+// screens). Explorer retains its separate 2 KiB selected-icon cache.
+// Never allocate icon buffers on the 8 KiB Arduino loopTask stack.
+static uint16_t gQeappUiIconPixels[1024] = {};
 static bool gBleReady = false;
 static bool statusWifi() { return WiFi.status() == WL_CONNECTED; }
 
@@ -114,7 +120,8 @@ const uint16_t *ExplorerApp::selectedIcon(AppContext &ctx,const LauncherRow &row
   if(!row.packageId || !ctx.storage.mounted()) {
     cachedIconId[0]=0; cachedIconValid=false; return nullptr;
   }
-  if(strcmp(cachedIconId,row.packageId)!=0) {
+  if(cachedIconRevision!=ctx.installer.revision()||strcmp(cachedIconId,row.packageId)!=0) {
+    cachedIconRevision=ctx.installer.revision();
     snprintf(cachedIconId,sizeof cachedIconId,"%s",row.packageId);
     cachedIconValid=ctx.installer.loadIcon(row.packageId,cachedIcon);
   }
@@ -1269,13 +1276,16 @@ void TextViewerApp::enter(AppContext &ctx) {
   returnTo = ctx.pendingPackageLaunch ? ScreenId::Applications : (ctx.pendingOpenPath.length() ? ScreenId::Files : ScreenId::Applications);
   bool fromPackage = ctx.pendingPackageLaunch;
   ctx.pendingPackageLaunch = false;
-  popup.close(); viewing=false; index=offset=page=0; nextOffset=0; lineCount=0;
+  popup.close(); viewing=false; packageOpenError=""; index=offset=page=0; nextOffset=0; lineCount=0;
   memset(offsets,0,sizeof(offsets));
   const char *ext[] = {".txt", ".md", ".log", ".json", ".ini", ".csv"};
   count=ctx.storage.scanMedia(StoragePaths::DOCUMENTS,ext,6,docs,MAX_DOCS,2);
   if(!count)count=ctx.storage.scanMedia("/",ext,6,docs,MAX_DOCS,3);
   if (fromPackage) {
     if (!ctx.pendingOpenPath.length() || !ctx.storage.exists(ctx.pendingOpenPath)) {
+      Serial.printf("[VQEAF][QEAPP][LAUNCH_FAIL] missing package document: %s\n",
+                    ctx.pendingOpenPath.c_str());
+      packageOpenError="Installed package content unavailable";
       ctx.pendingOpenPath="";
       return;
     }
@@ -1283,6 +1293,10 @@ void TextViewerApp::enter(AppContext &ctx) {
     if (f && !f.isDirectory()) {
       docs[0]=FsEntry("Package document",ctx.pendingOpenPath,false,f.size());count=1;index=offset=0;
       page=0;offsets[0]=0;loadPage(ctx,0);viewing=true;
+    }
+    if (!viewing) {
+      packageOpenError="Could not read signed package document";
+      Serial.println("[VQEAF][QEAPP][LAUNCH_FAIL] payload unreadable after verification");
     }
     if (f) f.close();
     ctx.pendingOpenPath="";
@@ -1338,6 +1352,11 @@ void TextViewerApp::drawViewer(AppContext &ctx) {
 void TextViewerApp::draw(AppContext &ctx) {
   if (viewing) { drawViewer(ctx); return; }
   ctx.ui.chrome("Text viewer",statusWifi(),false,false,ctx.settings.data().hour12);
+  if (packageOpenError.length()) {
+    ctx.ui.message("Cannot open QEAPP",packageOpenError,"Check SD card and reinstall");
+    ctx.ui.softkeys("","","Back");
+    return;
+  }
   if (!count) ctx.ui.message("Text viewer","No TXT/MD/LOG/JSON files found");
   else {
     for(int row=0;row<SymbianUI::LIST_VISIBLE;++row){int i=offset+row; if(i>=count){ctx.ui.clearListRow(row);continue;} ctx.ui.listItem(row,"Doc",docs[i].name,String((unsigned long)(docs[i].size/1024ULL))+" KB",i==index);} 
@@ -1660,7 +1679,7 @@ void SettingsApp::draw(AppContext &ctx) {
     else if (i == 3) value = s.hour12 ? "12-hour" : "24-hour";
     else if (i == 4) value = s.wifiAuto ? "On" : "Off";
     else if (i == 5) value = lockTimeoutText(s.lockTimeoutSec);
-    else value = "VQEAF OS v2.4.2";
+    else value = VQEAF_OS_VERSION_TEXT;
     ctx.ui.listItem(row, ics[i], labels[i], value, i == index);
   }
   ctx.ui.scrollbar(SETTINGS_COUNT, SymbianUI::LIST_VISIBLE, offset);
@@ -1718,7 +1737,7 @@ ScreenId SettingsApp::handle(AppContext &ctx, const KeyEvent &e) {
         else if (item == 3) value = s.hour12 ? "12-hour" : "24-hour";
         else if (item == 4) value = s.wifiAuto ? "On" : "Off";
         else if (item == 5) value = lockTimeoutText(s.lockTimeoutSec);
-        else value = "VQEAF OS v2.4.2";
+        else value = VQEAF_OS_VERSION_TEXT;
         ctx.ui.listItem(item - offset, ics[item], labels[item], value, selected);
       };
       paintRow(oldIndex, false);
@@ -1745,32 +1764,53 @@ static const ThemeId builtinThemeIds[4] = {
 static const char *const themeActions[] = {"Apply", "Rescan microSD", "Theme details"};
 static constexpr int THEME_ACTIONS = sizeof(themeActions)/sizeof(themeActions[0]);
 
+String ThemesApp::themePath(const AppContext &ctx, int item) const {
+  const int slot = item - BUILTIN_COUNT;
+  if (slot >= 0 && slot < ctx.themes.count()) return ctx.themes.at(slot).path;
+  return (slot == ctx.themes.count()) ? directThemePath : String();
+}
+
+String ThemesApp::themeTitle(const AppContext &ctx, int item) const {
+  if (item < BUILTIN_COUNT) return themeName(builtinThemeIds[item]);
+  const int slot = item - BUILTIN_COUNT;
+  if (slot >= 0 && slot < ctx.themes.count()) return ctx.themes.at(slot).label;
+  return (slot == ctx.themes.count()) ? directThemeName : String();
+}
+
 void ThemesApp::enter(AppContext &ctx, ScreenId from) {
   if (from == ScreenId::Launcher || from == ScreenId::Applications ||
       from == ScreenId::Settings || from == ScreenId::Files) returnTo = from;
   popup.close(); showDetails = false; feedback = "";
+  directThemePath = ""; directThemeName = "";
   ctx.themes.scan(ctx.storage);
   index = offset = 0;
-  if (ctx.pendingThemePath.length()) {
-    int found = ctx.themes.find(ctx.pendingThemePath);
+  const bool fromFile = ctx.pendingThemePath.length() != 0;
+  const String requested = fromFile ? ctx.pendingThemePath :
+      (ctx.settings.data().theme == ThemeId::External ? ctx.settings.selectedThemePath() : String());
+  ctx.pendingThemePath = "";
+  Serial.printf("[VQEAF][THEME] scan=%d mounted=%u request=%s\n",
+      ctx.themes.count(), unsigned(ctx.themes.hasCard()), requested.c_str());
+  if (requested.length()) {
+    const int found = ctx.themes.find(requested);
     if (found >= 0) index = BUILTIN_COUNT + found;
     else {
-      // Invalid downloads are intentionally not listed in the theme catalog;
-      // show the real parser error instead of the misleading "Rescan SD".
-      ThemeColors checkColors; LauncherStyle checkSkin;
-      String checkName, themeError;
-      if (!ctx.themes.load(ctx.storage,ctx.pendingThemePath,checkColors,
-                           checkName,themeError,&checkSkin)) feedback=themeError;
-      else feedback="Theme catalog full; move to /System/Themes";
-      ctx.notifications.push("Theme rejected",feedback);
+      // The catalog is deliberately bounded: a valid theme in Downloads,
+      // nested folders, or beyond the 16-slot scan must remain applicable.
+      ThemeColors colors; LauncherStyle skin;
+      String name, failure;
+      if (ctx.themes.load(ctx.storage, requested, colors, name, failure, &skin)) {
+        directThemePath = requested;
+        directThemeName = name.length() ? name : requested.substring(requested.lastIndexOf('/') + 1);
+        index = BUILTIN_COUNT + ctx.themes.count();
+        feedback = fromFile ? "Press Apply to use this theme" : "Saved external theme";
+        Serial.printf("[VQEAF][THEME] direct file validated: %s\n", requested.c_str());
+      } else {
+        feedback = failure;
+        ctx.notifications.push(fromFile ? "Theme rejected" : "Saved theme unavailable", failure);
+        Serial.printf("[VQEAF][THEME] load failed: %s (%s)\n", requested.c_str(), failure.c_str());
+      }
     }
-    ctx.pendingThemePath = "";
-  } else if (ctx.settings.data().theme == ThemeId::External) {
-    int found = ctx.themes.find(ctx.settings.selectedThemePath());
-    if (found >= 0) index = BUILTIN_COUNT + found;
-    else feedback = "Saved theme missing; Night fallback";
   } else {
-    // Focus the currently applied built-in theme when opening Themes.
     for (int i = 0; i < BUILTIN_COUNT; ++i)
       if (builtinThemeIds[i] == ctx.settings.data().theme) { index = i; break; }
   }
@@ -1784,24 +1824,25 @@ bool ThemesApp::apply(AppContext &ctx) {
     ctx.ui.setTheme(id);
     feedback = String(themeName(id)) + " applied";
     ctx.notifications.push("Theme applied", themeName(id));
+    Serial.printf("[VQEAF][THEME] built-in: %s\n", themeName(id));
     ctx.ui.clear();
     return true;
   }
-  const int slot = index - BUILTIN_COUNT;
-  if (slot < 0 || slot >= ctx.themes.count()) return false;
-  const ThemeFileService::Entry &item = ctx.themes.at(slot);
-  ThemeColors palette; LauncherStyle launcherSkin;
-  String name = item.label, error;
-  if (!ctx.themes.load(ctx.storage, item.path, palette, name, error, &launcherSkin)) {
+  const String path = themePath(ctx, index);
+  if (!path.length()) { feedback = "Choose a theme first"; return false; }
+  ThemeColors palette; LauncherStyle skin;
+  String name = themeTitle(ctx, index), error;
+  if (!ctx.themes.load(ctx.storage, path, palette, name, error, &skin)) {
     feedback = error;
     ctx.notifications.push("Invalid theme", error);
-    return false; // preserve current theme and its NVS entry
+    Serial.printf("[VQEAF][THEME] apply rejected: %s (%s)\n", path.c_str(), error.c_str());
+    return false; // previous theme and NVS entry remain unchanged
   }
-  // Commit only after full validation, then force a coherent redraw.
-  ctx.settings.selectThemeFile(item.path);
-  ctx.ui.setExternalTheme(palette, &launcherSkin);
+  ctx.settings.selectThemeFile(path);
+  ctx.ui.setExternalTheme(palette, &skin);
   ctx.notifications.push("Theme applied", name);
   feedback = name + " applied";
+  Serial.printf("[VQEAF][THEME] applied: %s\n", path.c_str());
   ctx.ui.clear();
   return true;
 }
@@ -1809,33 +1850,28 @@ bool ThemesApp::apply(AppContext &ctx) {
 void ThemesApp::draw(AppContext &ctx) {
   ctx.ui.chrome("Themes", statusWifi(), false, false, ctx.settings.data().hour12);
   for (int row = 0; row < SymbianUI::LIST_VISIBLE; ++row) {
-    int i = offset + row;
-    if (i >= total(ctx)) { ctx.ui.clearListRow(row); continue; }
-    String title, sub;
-    if (i < BUILTIN_COUNT) {
-      title = themeName(builtinThemeIds[i]);
-      sub = ctx.settings.data().theme == builtinThemeIds[i] ? "Applied | Built-in" : "Built-in";
+    const int item = offset + row;
+    if (item >= total(ctx)) { ctx.ui.clearListRow(row); continue; }
+    if (item < BUILTIN_COUNT) {
+      const ThemeId id = builtinThemeIds[item];
+      ctx.ui.listItem(row, "Th", themeName(id),
+          ctx.settings.data().theme == id ? "Applied | Built-in" : "Built-in", item == index);
     } else {
-      const ThemeFileService::Entry &file = ctx.themes.at(i - BUILTIN_COUNT);
-      title = file.label;
-      sub = ctx.settings.data().theme == ThemeId::External && ctx.settings.selectedThemePath() == file.path
-          ? "Applied | microSD" : "microSD / .vqeaf";
+      const String path = themePath(ctx, item);
+      const bool active = ctx.settings.data().theme == ThemeId::External &&
+          ctx.settings.selectedThemePath() == path;
+      const char *sub = active ? "Applied | microSD" :
+          (item == BUILTIN_COUNT + ctx.themes.count() ? "Opened file | press Apply" : "microSD / .vqeaf");
+      ctx.ui.listItem(row, "Th", themeTitle(ctx, item), sub, item == index);
     }
-    ctx.ui.listItem(row, "Th", title, sub, i == index);
   }
   ctx.ui.scrollbar(total(ctx), SymbianUI::LIST_VISIBLE, offset);
-  if (feedback.length()) {
-    // Draw inside content area below 6 rows, not over the 240x320 softkey bar.
+  if (feedback.length() || !ctx.themes.hasCard()) {
     TFT_eSPI &d = ctx.ui.display(); ThemeColors c = ctx.ui.c();
     d.fillRect(3, 281, 230, 15, c.bg);
     d.setTextFont(1); d.setTextSize(1); d.setTextColor(c.dim, c.bg);
-    String clipped = feedback.substring(0, 36);
-    d.setCursor(4, 284); d.print(clipped);
-  } else if (!ctx.themes.hasCard()) {
-    TFT_eSPI &d = ctx.ui.display(); ThemeColors c = ctx.ui.c();
-    d.fillRect(3, 281, 230, 15, c.bg);
-    d.setTextFont(1); d.setTextSize(1); d.setTextColor(c.dim,c.bg);
-    d.setCursor(4, 284); d.print("No SD: built-in themes available");
+    d.setCursor(4, 284);
+    d.print((feedback.length() ? feedback : String("No SD: built-in themes" )).substring(0, 36));
   }
   ctx.ui.softkeys("Options", "Apply", "Back");
   drawPopup(ctx, popup, themeActions, THEME_ACTIONS);
@@ -1846,60 +1882,61 @@ ScreenId ThemesApp::handle(AppContext &ctx, const KeyEvent &e) {
   if (showDetails) { showDetails = false; draw(ctx); return ScreenId::Themes; }
   if (popup.open) {
     if (e.key == Key::Start || e.key == Key::Select) {
-      int action = popup.index;
+      const int action = popup.index;
       popup.close();
       if (action == 0) apply(ctx);
       else if (action == 1) {
-        // Preserve the selected file across a refresh where possible.
-        String selected = index >= BUILTIN_COUNT
-            ? String(ctx.themes.at(index - BUILTIN_COUNT).path) : String();
+        const bool hadDirect = directThemePath.length() > 0;
+        const String selected = index >= BUILTIN_COUNT ? themePath(ctx, index) : String();
         ctx.themes.scan(ctx.storage);
-        int refreshed = selected.length() ? ctx.themes.find(selected) : -1;
-        index = refreshed >= 0 ? BUILTIN_COUNT + refreshed :
-                (index < BUILTIN_COUNT ? index : 0);
-        offset = index >= SymbianUI::LIST_VISIBLE
-            ? index - SymbianUI::LIST_VISIBLE + 1 : 0;
-        feedback = ctx.themes.hasCard() ? String(ctx.themes.count()) + " SD themes found"
-            : "microSD not mounted";
+        const int refreshed = selected.length() ? ctx.themes.find(selected) : -1;
+        if (refreshed >= 0) {
+          if (selected == directThemePath) { directThemePath = ""; directThemeName = ""; }
+          index = BUILTIN_COUNT + refreshed;
+        } else if (selected.length() && hadDirect && selected == directThemePath) {
+          ThemeColors c; LauncherStyle skin; String n, err;
+          if (ctx.themes.load(ctx.storage, directThemePath, c, n, err, &skin))
+            index = BUILTIN_COUNT + ctx.themes.count();
+          else { directThemePath = ""; directThemeName = ""; index = 0; feedback = err; }
+        } else index = index < BUILTIN_COUNT ? index : 0;
+        offset = index >= SymbianUI::LIST_VISIBLE ? index - SymbianUI::LIST_VISIBLE + 1 : 0;
+        if (!feedback.length()) feedback = ctx.themes.hasCard() ?
+            String(ctx.themes.count()) + " SD themes found" : "microSD not mounted";
       } else if (action == 2) {
-        String title = index < BUILTIN_COUNT ? themeName(builtinThemeIds[index]) : ctx.themes.at(index - BUILTIN_COUNT).label;
-        String desc = index < BUILTIN_COUNT ? "Embedded RGB565 palette" : ctx.themes.at(index - BUILTIN_COUNT).path;
-        ctx.ui.message("Theme information", title, desc, "START to return");
+        ctx.ui.message("Theme information", themeTitle(ctx, index),
+            index < BUILTIN_COUNT ? "Embedded RGB565 palette" : themePath(ctx, index),
+            "START to return");
         ctx.ui.softkeys("", "", "Back");
         showDetails = true;
         return ScreenId::Themes;
       }
-      draw(ctx); // Full list redraw only when the popup closes.
+      draw(ctx);
     } else {
-      const bool wasOpen = popup.open;
       popupNav(popup, e, THEME_ACTIONS);
-      if (wasOpen && popup.open) drawPopup(ctx, popup, themeActions, THEME_ACTIONS);
+      if (popup.open) drawPopup(ctx, popup, themeActions, THEME_ACTIONS);
       else draw(ctx);
     }
     return ScreenId::Themes;
   }
   if (e.key == Key::A || e.key == Key::B) return returnTo;
   if ((e.key == Key::Up && index > 0) || (e.key == Key::Down && index < total(ctx)-1)) {
-    int old = index, oldOffset = offset;
+    const int old = index, oldOffset = offset;
     index += e.key == Key::Up ? -1 : 1;
     if (index < offset) --offset;
     if (index >= offset + SymbianUI::LIST_VISIBLE) ++offset;
     if (oldOffset != offset) draw(ctx);
     else {
-      // Partial redraw for selection changes: no full-screen flash on keypad.
-      auto rp = [&](int i, bool selected) {
-        String title, sub;
-        if (i < BUILTIN_COUNT) {
-          title = themeName(builtinThemeIds[i]);
-          sub = ctx.settings.data().theme == builtinThemeIds[i] ? "Applied | Built-in" : "Built-in";
-        } else {
-          const ThemeFileService::Entry &it = ctx.themes.at(i - BUILTIN_COUNT);
-          title = it.label;
-          sub = ctx.settings.data().theme == ThemeId::External && ctx.settings.selectedThemePath() == it.path ? "Applied | microSD" : "microSD / .vqeaf";
-        }
-        ctx.ui.listItem(i-offset, "Th", title, sub, selected);
+      auto row = [&](int item, bool selected) {
+        const bool builtIn = item < BUILTIN_COUNT;
+        const String path = builtIn ? String() : themePath(ctx, item);
+        const bool active = builtIn ? ctx.settings.data().theme == builtinThemeIds[item] :
+            (ctx.settings.data().theme == ThemeId::External && ctx.settings.selectedThemePath() == path);
+        const String sub = builtIn ? (active ? "Applied | Built-in" : "Built-in") :
+            (active ? "Applied | microSD" : (item == BUILTIN_COUNT + ctx.themes.count() ?
+             "Opened file | press Apply" : "microSD / .vqeaf"));
+        ctx.ui.listItem(item - offset, "Th", themeTitle(ctx, item), sub, selected);
       };
-      rp(old, false); rp(index, true);
+      row(old, false); row(index, true);
       ctx.ui.scrollbar(total(ctx), SymbianUI::LIST_VISIBLE, offset);
     }
   } else if (e.key == Key::Start || e.key == Key::Select) {
@@ -1929,13 +1966,14 @@ static const char *const INSTALLER_OPTS[] = {
 };
 static constexpr int INSTALLER_OPT_COUNT = 7;
 
-void AppInstallerApp::reload(AppContext &ctx) {
+void AppInstallerApp::reload(AppContext &ctx, bool forceCatalogRefresh) {
   count=0;index=0;offset=0;details=false;confirm=false;feedback="";selectedPath="";previewIconReady=false;willUpdate=false;installAllowed=false;confirmData=false;previousVersion="";
   if (!ctx.storage.mounted()) {feedback="microSD not mounted";return;}
   if (!ctx.storage.ensureSystemLayout()) {
     feedback="SD folders unavailable or read-only";
   }
-  ctx.installer.refresh();
+  if (forceCatalogRefresh) ctx.installer.refresh();
+  else ctx.installer.refreshIfNeeded();
   if (installedTab) { count=ctx.installer.count();return; }
   // Users may copy .qeapp to Downloads or the card root. Show all three
   // known import locations without recursive scanning or dynamic arrays.
@@ -1954,15 +1992,12 @@ void AppInstallerApp::reload(AppContext &ctx) {
         if(!filePath.endsWith("/"))filePath+="/";
         filePath+=name;
         inbox[count]=FsEntry(name,filePath,false,item.size());
-        Qeapp::Meta meta;String readError;
+        // Do not hash/verify *every* Inbox file while returning from install:
+        // only the package selected by the user is verified in openDetails().
+        // install() always independently verifies it again before any writes.
         InboxLabel &label=inboxLabel[count];
-        label.manifestOk=ctx.installer.inspect(filePath,meta,readError);
+        label.manifestOk=false;
         label.name[0]=label.version[0]=label.type[0]=0;
-        if(label.manifestOk){
-          snprintf(label.name,sizeof label.name,"%s",meta.name);
-          snprintf(label.version,sizeof label.version,"%s",meta.version);
-          snprintf(label.type,sizeof label.type,"%s",meta.type);
-        }
         ++count;
       }
       item.close();item=folder.openNextFile();
@@ -1975,13 +2010,23 @@ void AppInstallerApp::reload(AppContext &ctx) {
 
 void AppInstallerApp::enter(AppContext &ctx,ScreenId from){
   returnTo=(from==ScreenId::Files||from==ScreenId::Browser)?from:ScreenId::Applications;
-  installedTab=false;popup.close();reload(ctx);
-  operationResultOpen=false;
-  if(ctx.pendingPackagePath.length()){
-    selectedPath=ctx.pendingPackagePath;ctx.pendingPackagePath="";
-    // A package opened from File Manager can be outside the inbox.
+  installedTab=false;popup.close();operationResultOpen=false;resultCanOpen=false;resultAppId[0]=0;
+  const String requested=ctx.pendingPackagePath;
+  ctx.pendingPackagePath="";
+  if(requested.length()){
+    // Fast path: avoid re-verifying up to 12 unrelated Inbox packages while
+    // the user is still holding START on a specific file in File Manager.
+    count=index=offset=0;details=confirm=verified=false;
+    feedback="";selectedPath=requested;previewIconReady=false;
+    willUpdate=installAllowed=confirmData=false;previousVersion="";
+    if(ctx.storage.mounted()){
+      ctx.storage.ensureSystemLayout();
+      ctx.installer.refreshIfNeeded();
+    }
     openDetails(ctx);
-  }
+    Serial.printf("[VQEAF][QEAPP] opened: %s verified=%u reason=%s\n",
+        requested.c_str(), unsigned(verified), feedback.c_str());
+  }else reload(ctx,false); // boot/SD/installer already established trusted catalog
 }
 
 void AppInstallerApp::paintRow(AppContext &ctx,int item,bool selected){
@@ -1989,15 +2034,15 @@ void AppInstallerApp::paintRow(AppContext &ctx,int item,bool selected){
  if(installedTab){
    if(item>=ctx.installer.count()){ctx.ui.clearListRow(row);return;}
    const auto &app=ctx.installer.at(item);
-   ctx.ui.listItem(row,"App",app.info.name,String("v")+app.info.version+" / "+app.info.type,selected);
-   uint16_t pixels[1024];
-   if(ctx.installer.loadIcon(app.info.id,pixels))ctx.ui.display().pushImage(9,SymbianUI::CONTENT_TOP+1+row*SymbianUI::LIST_ROW_H+10,32,32,pixels);
+   const bool custom=ctx.installer.loadIcon(app.info.id,gQeappUiIconPixels);
+   ctx.ui.listItem(row,"App",app.info.name,String("v")+app.info.version+" / "+app.info.type,selected,!custom);
+   if(custom)QeappIconBlit::draw(ctx.ui.display(),9,SymbianUI::CONTENT_TOP+1+row*SymbianUI::LIST_ROW_H+4,gQeappUiIconPixels);
  }else{
    if(item>=count){ctx.ui.clearListRow(row);return;}
    if(inboxLabel[item].manifestOk)
      ctx.ui.listItem(row,"App",inboxLabel[item].name,
        String("v")+inboxLabel[item].version+" / "+inboxLabel[item].type,selected);
-   else ctx.ui.listItem(row,"File",inbox[item].name,"Unsigned / invalid - Details",selected);
+   else ctx.ui.listItem(row,"File",inbox[item].name,"Select to verify signature",selected);
  }
 }
 
@@ -2011,7 +2056,8 @@ void AppInstallerApp::openDetails(AppContext &ctx){
    }else feedback="No installed app selected";
  }else{
    if(!selectedPath.length()&&index>=0&&index<count)selectedPath=inbox[index].path;
-   if(selectedPath.length())verified=ctx.installer.inspect(selectedPath,selectedMeta,feedback);
+   if(selectedPath.length())verified=ctx.installer.inspectWithIcon(
+       selectedPath,selectedMeta,feedback,gQeappUiIconPixels,previewIconReady);
    else feedback="No .qeapp selected";
  }
  if(verified){
@@ -2028,9 +2074,8 @@ void AppInstallerApp::openDetails(AppContext &ctx){
      }
    }
  }
- if (verified) previewIconReady = installedTab ?
-   ctx.installer.loadIcon(selectedMeta.id,previewPixels) :
-   ctx.installer.previewIcon(selectedPath,previewPixels);
+ if (verified && installedTab)
+   previewIconReady=ctx.installer.loadIcon(selectedMeta.id,gQeappUiIconPixels);
 }
 
 void AppInstallerApp::draw(AppContext &ctx){
@@ -2040,8 +2085,9 @@ void AppInstallerApp::draw(AppContext &ctx){
    ctx.ui.message("App installer","microSD is not available");ctx.ui.softkeys("","","Back");return;
  }
  if(operationResultOpen){
-   ctx.ui.message(operationResultTitle,feedback,"Press Back to continue");
-   ctx.ui.softkeys("","","Back");return;
+   ctx.ui.message(operationResultTitle,feedback.substring(0,34),
+     feedback.substring(34,68),"Press Back to continue");
+   ctx.ui.softkeys("",resultCanOpen?"Open":"","Back");return;
  }
  if(confirm){
    ctx.ui.dialog(confirmData?"Erase app data?":(installedTab?"Uninstall application?":(willUpdate?"Update application?":"Install application?")),
@@ -2051,12 +2097,22 @@ void AppInstallerApp::draw(AppContext &ctx){
    ctx.ui.softkeys("","Select","Cancel");return;
  }
  if(details){
-   if(!verified){ctx.ui.message("Package rejected",feedback,"No files were installed");ctx.ui.softkeys("","","Back");return;}
+   if(!verified){
+     // TFT 240x320 cannot display a 75-character crypto diagnostic on one
+     // 6px-font row. Give a specific hint for the actual demo-key mismatch.
+     if(strstr(feedback.c_str(),"Snake demo"))
+       ctx.ui.message("Package rejected","Different QEAPP signing key",
+         "Snake demo: use demo firmware","No files were installed");
+     else
+       ctx.ui.message("Package rejected",feedback.substring(0,34),
+         feedback.substring(34,68),"No files were installed");
+     ctx.ui.softkeys("","","Back");return;
+   }
    ctx.ui.message(installedTab?"Installed application":(willUpdate?"Signed update available":"Signature verified"),
        selectedMeta.name,String("Version ")+selectedMeta.version+"  /  "+selectedMeta.type,
        !installedTab&&!installAllowed?feedback:(
        !strcmp(selectedMeta.type,"web")?"Access: network (HTTPS URL)":"Access: bundled text only"));
-   if(previewIconReady)ctx.ui.display().pushImage(103,170,32,32,previewPixels);
+   if(previewIconReady)QeappIconBlit::draw(ctx.ui.display(),103,170,gQeappUiIconPixels);
    else ctx.ui.drawIcon(101,167,"App",ctx.ui.c().bg);
    ctx.ui.softkeys("Options",installedTab?"Open":(installAllowed?(willUpdate?"Update":"Install"):"Disabled"),"Back");
    drawPopup(ctx,popup,INSTALLER_OPTS,INSTALLER_OPT_COUNT);return;
@@ -2076,8 +2132,13 @@ void AppInstallerApp::draw(AppContext &ctx){
 ScreenId AppInstallerApp::handle(AppContext &ctx,const KeyEvent &e){
  if(!e.pressed||e.longPress)return ScreenId::AppInstaller;
  if(operationResultOpen){
+   if(e.key==Key::Start && resultCanOpen){
+     ctx.pendingPackageId=resultAppId;
+     operationResultOpen=false;resultCanOpen=false;
+     return ScreenId::PackageApp; // main resolves after full signed re-verification
+   }
    if(e.key==Key::A||e.key==Key::B||e.key==Key::Start){
-     operationResultOpen=false;draw(ctx);
+     operationResultOpen=false;resultCanOpen=false;draw(ctx);
    }
    return ScreenId::AppInstaller;
  }
@@ -2110,7 +2171,12 @@ ScreenId AppInstallerApp::handle(AppContext &ctx,const KeyEvent &e){
        }
        const bool upgrading=willUpdate, erased=confirmData;
        const bool wasInstalledTab=installedTab;
-       confirm=false;details=false;reload(ctx);
+       const bool openAfterInstall=!error.length()&&!erased&&!wasInstalledTab;
+       char newId[25]={};
+       if(openAfterInstall)snprintf(newId,sizeof newId,"%s",selectedMeta.id);
+       confirm=false;details=false;reload(ctx,false);
+       resultCanOpen=openAfterInstall;
+       if(openAfterInstall)snprintf(resultAppId,sizeof resultAppId,"%s",newId);
        // Show full diagnostic instead of truncating errors to a 32-char footer.
        operationResultOpen=true;
        operationResultTitle=error.length()?"App manager failed":"App manager";
@@ -2126,7 +2192,7 @@ ScreenId AppInstallerApp::handle(AppContext &ctx,const KeyEvent &e){
      int choice=popup.index;popup.close();
      if(choice==0){selectedPath="";openDetails(ctx);}
      if(choice==1){if(!details){selectedPath="";openDetails(ctx);}if(verified&&(installedTab||installAllowed)){confirm=true;confirmData=false;confirmChoice=1;}}
-     if(choice==2){installedTab=!installedTab;selectedPath="";reload(ctx);}
+     if(choice==2){installedTab=!installedTab;selectedPath="";reload(ctx,false);}
      if(choice==3){selectedPath="";reload(ctx);}
      if(choice==4)return ScreenId::Applications;
      if(choice==5){
@@ -2213,9 +2279,9 @@ void ApplicationsApp::draw(AppContext &ctx){
    if(item<APP_COUNT)ctx.ui.listItem(row,applicationIcon[item],applicationTitle[item],applicationSub[item],item==index);
    else{
      const auto &entry=ctx.installer.at(item-APP_COUNT);
-     ctx.ui.listItem(row,"App",entry.info.name,String("v")+entry.info.version+" / "+entry.info.type,item==index);
-     uint16_t pixels[1024];if(ctx.installer.loadIcon(entry.info.id,pixels))
-       ctx.ui.display().pushImage(9,SymbianUI::CONTENT_TOP+1+row*SymbianUI::LIST_ROW_H+10,32,32,pixels);
+     const bool custom=ctx.installer.loadIcon(entry.info.id,gQeappUiIconPixels);
+     ctx.ui.listItem(row,"App",entry.info.name,String("v")+entry.info.version+" / "+entry.info.type,item==index,!custom);
+     if(custom)QeappIconBlit::draw(ctx.ui.display(),9,SymbianUI::CONTENT_TOP+1+row*SymbianUI::LIST_ROW_H+4,gQeappUiIconPixels);
    }
  }
  ctx.ui.scrollbar(total,SymbianUI::LIST_VISIBLE,offset);
@@ -2246,9 +2312,9 @@ ScreenId ApplicationsApp::handle(AppContext &ctx,const KeyEvent &e){
      auto rp=[&](int item,bool sel){int row=item-offset;if(row<0||row>=SymbianUI::LIST_VISIBLE)return;
        if(item<APP_COUNT)ctx.ui.listItem(row,applicationIcon[item],applicationTitle[item],applicationSub[item],sel);
        else{const auto &entry=ctx.installer.at(item-APP_COUNT);
-         ctx.ui.listItem(row,"App",entry.info.name,String("v")+entry.info.version+" / "+entry.info.type,sel);
-         uint16_t pixels[1024];if(ctx.installer.loadIcon(entry.info.id,pixels))
-           ctx.ui.display().pushImage(9,SymbianUI::CONTENT_TOP+1+row*SymbianUI::LIST_ROW_H+10,32,32,pixels);
+         const bool custom=ctx.installer.loadIcon(entry.info.id,gQeappUiIconPixels);
+         ctx.ui.listItem(row,"App",entry.info.name,String("v")+entry.info.version+" / "+entry.info.type,sel,!custom);
+         if(custom)QeappIconBlit::draw(ctx.ui.display(),9,SymbianUI::CONTENT_TOP+1+row*SymbianUI::LIST_ROW_H+4,gQeappUiIconPixels);
        }};
      rp(old,false);rp(index,true);ctx.ui.scrollbar(total,SymbianUI::LIST_VISIBLE,offset);
    }

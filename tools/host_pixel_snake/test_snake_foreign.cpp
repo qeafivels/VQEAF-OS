@@ -16,7 +16,7 @@ int main(int argc,char **argv){
  copyFile(argv[2],root+"/System/Apps/Inbox/snake.qeapp");
  Qeapp::Meta meta;String reason;
  assert(!apps.inspect("/System/Apps/Inbox/snake.qeapp",meta,reason));
- assert(reason=="Unknown signing key ID");
+ assert(std::string(reason.c_str()).rfind("Unknown signing key ID",0)==0); // v2.4.3 adds actionable key-profile diagnostics
  assert(apps.count()==0);
  puts("PASS default firmware rejects demo-signed game (pin isolation)");
 }

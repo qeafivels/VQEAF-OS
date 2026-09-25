@@ -25,6 +25,14 @@ const char *name(Id id);
 // transparent regions are skipped; this also avoids stale glyph pixels on focus.
 bool draw(TFT_eSPI &tft, Id id, int16_t x, int16_t y, uint8_t size,
           uint16_t background, const Palette &palette, bool clearBackground = true);
+// Fast path for a FLAT, fully opaque 24/36px cell. The caller must pass the
+// exact local background; it is written only inside the icon square. Pixel
+// colors and geometry are lossless relative to draw(...,clearBackground=true).
+// A 36-pixel scanline (72 B stack) replaces hundreds of individual SPI spans.
+// Do not use when transparent art must preserve a non-uniform underlay.
+bool drawOpaque(TFT_eSPI &tft, Id id, int16_t x, int16_t y, uint8_t size,
+                uint16_t background);
+
 // Test-only access to the SAME optimized decoder used by draw(). No icon
 // data copied into the test TU, so normal firmware Flash stays unchanged.
 #if defined(VQEAF_ICON_SELFTEST)

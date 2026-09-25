@@ -1,5 +1,62 @@
 #include "AppInstallerService.h"
 #include <string.h>
+#include <memory>
+#include <new>
+#if defined(ARDUINO_ARCH_ESP32)
+#include <esp_attr.h>
+#include <esp_system.h>
+#include <esp_heap_caps.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#endif
+
+// The most recently reached installer phase survives most watchdog/panic
+// resets in RTC memory. It is diagnostic only; NEVER authorizes recovery or
+// changes the signed package trust policy. RTC can be lost on brownout.
+namespace {
+#if defined(ARDUINO_ARCH_ESP32)
+static constexpr uint32_t INSTALL_MARK_MAGIC = 0x51494E53UL; // QINS
+RTC_NOINIT_ATTR static volatile uint32_t installRtcMagic;
+RTC_NOINIT_ATTR static volatile uint32_t installRtcPhase;
+RTC_NOINIT_ATTR static volatile uint32_t installRtcCount;
+#endif
+static void traceInstall(uint32_t phase,const char *event) {
+#if defined(ARDUINO_ARCH_ESP32)
+  if (installRtcMagic != INSTALL_MARK_MAGIC) installRtcCount=0;
+  installRtcPhase = phase;
+  installRtcMagic = INSTALL_MARK_MAGIC;
+  ++installRtcCount;
+  const unsigned long heap=(unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  const unsigned long largest=(unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  const unsigned long stack=(unsigned long)uxTaskGetStackHighWaterMark(nullptr);
+  Serial.printf("[QEAPP][INSTALL][%lu] %s heap=%lu largest=%lu stack_hwm=%lu\n",
+                (unsigned long)phase,event,heap,largest,stack);
+#else
+  (void)phase; (void)event;
+#endif
+}
+struct InstallTraceGuard {
+  InstallTraceGuard(){traceInstall(10,"install_entry");}
+  ~InstallTraceGuard(){traceInstall(0,"normal_return");}
+};
+}
+
+void AppInstallerService::printBootInstallDiagnostics() {
+#if defined(ARDUINO_ARCH_ESP32)
+  const esp_reset_reason_t reason=esp_reset_reason();
+  if (installRtcMagic == INSTALL_MARK_MAGIC && installRtcPhase > 0 && installRtcPhase <= 100 &&
+      reason != ESP_RST_POWERON) {
+    Serial.printf("[QEAPP][PREVIOUS_RESET] reset=%d installer_phase=%lu (not a confirmed cause)\n",
+      (int)reason,(unsigned long)installRtcPhase);
+  }
+  // Clear stale state only after collecting it; an interrupted next install
+  // will set its own marker. A full power cut cannot guarantee RTC retention.
+  installRtcPhase=0; installRtcCount=0; installRtcMagic=INSTALL_MARK_MAGIC;
+#else
+  // Serial diagnostics are available on ESP32 hardware only.
+#endif
+}
+
 
 void AppInstallerService::progress(uint8_t percent,const char *phase){
  if(!progressFn)return;
@@ -49,14 +106,17 @@ bool AppInstallerService::scanPackage(File &f,Qeapp::Header &h,Qeapp::Meta &m,St
  if(f.read(hdr,sizeof hdr)!=(int)sizeof hdr){error="Truncated header";return false;}
  const char *reason="";
  if(!Qeapp::parseHeader(hdr,f.size(),h,reason)){error=reason;return false;}
- char manifest[Qeapp::MAX_MANIFEST+1];
- if(f.read(reinterpret_cast<uint8_t*>(manifest),h.manifestLen)!=(int)h.manifestLen){error="Truncated manifest";return false;}
+ // Heap-owned workspace avoids >2 KiB manifest on Arduino loopTask stack;
+ // handle OOM without panicking or accepting an unverified package.
+ std::unique_ptr<char[]> manifest(new (std::nothrow) char[Qeapp::MAX_MANIFEST+1]);
+ if(!manifest){error="Not enough RAM to inspect package";return false;}
+ if(f.read(reinterpret_cast<uint8_t*>(manifest.get()),h.manifestLen)!=(int)h.manifestLen){error="Truncated manifest";return false;}
  manifest[h.manifestLen]=0;
  Qeapp::Sha256 signedBytes;signedBytes.update(hdr,sizeof hdr);
- signedBytes.update(reinterpret_cast<const uint8_t*>(manifest),h.manifestLen);
- Qeapp::Sha256 sha;sha.update(reinterpret_cast<const uint8_t*>(manifest),h.manifestLen);uint8_t digest[32];sha.finish(digest);
+ signedBytes.update(reinterpret_cast<const uint8_t*>(manifest.get()),h.manifestLen);
+ Qeapp::Sha256 sha;sha.update(reinterpret_cast<const uint8_t*>(manifest.get()),h.manifestLen);uint8_t digest[32];sha.finish(digest);
  if(!Qeapp::equalHash(digest,h.manifestHash)){error="Manifest SHA-256 mismatch";return false;}
- if(!Qeapp::parseManifest(manifest,h.manifestLen,m,reason)){error=reason;return false;}
+ if(!Qeapp::parseManifest(manifest.get(),h.manifestLen,m,reason)){error=reason;return false;}
  m.hasIcon=(h.iconLen==Qeapp::ICON_BYTES);
  if(!strcmp(m.type,"text")&&!h.payloadLen){error="Text app has no payload";return false;}
  if(!strcmp(m.type,"web")&&h.payloadLen){error="Web app must not contain payload";return false;}
@@ -79,11 +139,29 @@ bool AppInstallerService::scanPackage(File &f,Qeapp::Header &h,Qeapp::Meta &m,St
  error="";return true;
 }
 
-bool AppInstallerService::inspect(const String &pkg,Qeapp::Meta &meta,String &error){
+bool AppInstallerService::inspectWithIcon(const String &pkg,Qeapp::Meta &meta,
+                                          String &error,uint16_t out[1024],bool &iconReady){
+ iconReady=false;
  if(!card||!card->mounted()){error="microSD not mounted";return false;}
- // Accept user-chosen microSD path, never install directories.
- String path=pkg;path.toLowerCase();if(!path.endsWith(".qeapp")||!pkg.startsWith("/")){error="Expected .qeapp file";return false;}
- File f=card->fs().open(pkg,FILE_READ);Qeapp::Header h;bool ok=scanPackage(f,h,meta,error,true);if(f)f.close();return ok;
+ String path=pkg;path.toLowerCase();
+ if(!path.endsWith(".qeapp")||!pkg.startsWith("/")||pkg.length()>220||
+    strstr(pkg.c_str(),"..")!=nullptr||strchr(pkg.c_str(),'\\')!=nullptr){
+   error="Expected safe absolute .qeapp file path";return false;
+ }
+ File f=card->fs().open(pkg,FILE_READ);Qeapp::Header h;
+ const bool ok=scanPackage(f,h,meta,error,true);
+ // Reuse the already-verified package handle. No second ECDSA/payload pass.
+ // This is only a visual preview; install and launch independently verify.
+ if(ok&&out&&h.iconLen==Qeapp::ICON_BYTES){
+   iconReady=f.seek(Qeapp::HEADER_BYTES+h.manifestLen)&&
+             f.read(reinterpret_cast<uint8_t*>(out),Qeapp::ICON_BYTES)==(int)Qeapp::ICON_BYTES;
+ }
+ if(f)f.close();
+ return ok;
+}
+bool AppInstallerService::inspect(const String &pkg,Qeapp::Meta &meta,String &error){
+ bool ignored=false;
+ return inspectWithIcon(pkg,meta,error,nullptr,ignored);
 }
 
 bool AppInstallerService::copySection(File &src,const String &dst,uint32_t bytes,const uint8_t hash[32],String &error){
@@ -133,7 +211,9 @@ bool AppInstallerService::verifyDirectory(const String &dir,const String &id,Qea
  uint32_t lengths[3]={h.manifestLen,h.iconLen,h.payloadLen};
  const uint8_t *hashes[3]={h.manifestHash,h.iconHash,h.payloadHash};
  const char *names[3]={"/manifest.ini","/icon.rgb565","/payload.txt"};
- char manifest[Qeapp::MAX_MANIFEST+1]={0};uint8_t buffer[512],digest[32];
+ std::unique_ptr<char[]> manifest(new (std::nothrow) char[Qeapp::MAX_MANIFEST+1]());
+ if(!manifest){error="Not enough RAM to verify installed app";return false;}
+ uint8_t buffer[512],digest[32];
  for(int i=0;i<3;i++){
    File file=fs.open(dir+names[i],FILE_READ);
    if(lengths[i]==0){if(file){file.close();error="Unexpected unsigned section";return false;}}
@@ -144,7 +224,7 @@ bool AppInstallerService::verifyDirectory(const String &dir,const String &id,Qea
    while(left){size_t n=left>sizeof buffer?sizeof buffer:left;
      if(file.read(buffer,n)!=(int)n){file.close();error="Installed content truncated";return false;}
      section.update(buffer,n);signedBytes.update(buffer,n);
-     if(i==0){memcpy(manifest+pos,buffer,n);pos+=n;}
+     if(i==0){memcpy(manifest.get()+pos,buffer,n);pos+=n;}
      left-=n;
 #if defined(ARDUINO) && !defined(QEAPP_HOST_OPENSSL) && !defined(QEAPP_HOST_STUB_CRYPTO)
      yield();
@@ -154,7 +234,7 @@ bool AppInstallerService::verifyDirectory(const String &dir,const String &id,Qea
    section.finish(digest);
    if(!Qeapp::equalHash(digest,hashes[i])){error="Installed content hash mismatch";return false;}
  }
- if(!Qeapp::parseManifest(manifest,h.manifestLen,meta,reason)||id!=meta.id){error="Installed manifest invalid";return false;}
+ if(!Qeapp::parseManifest(manifest.get(),h.manifestLen,meta,reason)||id!=meta.id){error="Installed manifest invalid";return false;}
  if((!strcmp(meta.type,"text")&&!h.payloadLen)||(!strcmp(meta.type,"web")&&h.payloadLen)){error="Installed app type mismatch";return false;}
  meta.hasIcon=h.iconLen==Qeapp::ICON_BYTES;
  signedBytes.finish(digest);
@@ -177,20 +257,22 @@ AppInstallerService::RecoveryStats AppInstallerService::recoverTransactions(){
  fs::FS &fs=card->fs();File root=fs.open(StoragePaths::APPS_INSTALLED,FILE_READ);
  if(!root||!root.isDirectory()){if(root)root.close();return recovery;}
  // Snapshot names: renaming while an SD directory iterator is active is unsafe.
- char ids[32][25]={};int n=0;
- char staged[32][25]={};int stages=0;File dir=root.openNextFile();
+ struct RecoveryNames { char ids[32][25]={}; char staged[32][25]={}; };
+ std::unique_ptr<RecoveryNames> names(new (std::nothrow) RecoveryNames());
+ if(!names){root.close();++recovery.blocked;return recovery;}
+ int n=0,stages=0;File dir=root.openNextFile();
  while(dir){
    String name=fileName(String(dir.name()));
    if(dir.isDirectory()&&name.startsWith(".backup-")){
      String id=name.substring(8);
      if(safeId(id)){
-       if(n<32)snprintf(ids[n++],sizeof ids[0],"%s",id.c_str());
+       if(n<32)snprintf(names->ids[n++],sizeof names->ids[0],"%s",id.c_str());
        else if(recovery.blocked<255)++recovery.blocked;
      }
    }else if(dir.isDirectory()&&name.startsWith(".stage-")){
      String id=name.substring(7);
      if(safeId(id)){
-       if(stages<32)snprintf(staged[stages++],sizeof staged[0],"%s",id.c_str());
+       if(stages<32)snprintf(names->staged[stages++],sizeof names->staged[0],"%s",id.c_str());
        else if(recovery.blocked<255)++recovery.blocked;
      }
    }
@@ -198,7 +280,7 @@ AppInstallerService::RecoveryStats AppInstallerService::recoverTransactions(){
  }
  root.close();
  for(int i=0;i<n;i++){
-   const String id(ids[i]);
+   const String id(names->ids[i]);
    const String finalDir=installedPath(id);
    const String backup=String(StoragePaths::APPS_INSTALLED)+"/.backup-"+id;
    Qeapp::Meta oldMeta,finalMeta;String why;
@@ -234,7 +316,7 @@ AppInstallerService::RecoveryStats AppInstallerService::recoverTransactions(){
  // requires a fresh user confirmation. They can be discarded if they contain
  // only installer-owned files; unexpected files require manual inspection.
  for(int i=0;i<stages;i++){
-   String id(staged[i]);
+   String id(names->staged[i]);
    String pending=String(StoragePaths::APPS_INSTALLED)+"/.stage-"+id;
    String backup=String(StoragePaths::APPS_INSTALLED)+"/.backup-"+id;
    if(fs.exists(backup))continue; // unresolved rollback, keep diagnostics
@@ -253,7 +335,8 @@ bool AppInstallerService::updateAvailable(const Qeapp::Meta &candidate) const {
 }
 
 void AppInstallerService::refresh(){
- used=0;if(!card||!card->mounted())return;
+ ++catalogRevision;
+ used=0;catalogReady=false;if(!card||!card->mounted())return;
  recoverTransactions();
  File root=card->fs().open(StoragePaths::APPS_INSTALLED,FILE_READ);
  if(!root||!root.isDirectory())return;
@@ -263,32 +346,60 @@ void AppInstallerService::refresh(){
    if(dir.isDirectory()&&safeId(id)){
      Qeapp::Meta verified;String reason;
      if(verifyInstalled(id,verified,reason)){
-       installed[used].info=verified;
-       snprintf(installed[used].path,sizeof installed[used].path,"%s",installedPath(id).c_str());used++;
+       // Only accept icon reference digest after full on-disk signature check.
+       // A modified icon after refresh never renders; launch still verifies all bytes.
+       uint8_t receipt[Qeapp::HEADER_BYTES];
+       File proof=card->fs().open(installedPath(id)+"/receipt.bin",FILE_READ);
+       const bool proofOk=proof && proof.read(receipt,sizeof receipt)==(int)sizeof receipt;
+       if(proof)proof.close();
+       if(proofOk){
+         installed[used].info=verified;
+         memcpy(installed[used].verifiedIconHash,receipt+52,32);
+         snprintf(installed[used].path,sizeof installed[used].path,"%s",installedPath(id).c_str());used++;
+       }
      }
    }
    dir.close();dir=root.openNextFile();
  }
  if(dir)dir.close();
  root.close();
+ catalogReady=true;
 }
 
-bool AppInstallerService::get(const String &id,Qeapp::Meta &meta) const{
+bool AppInstallerService::get(const String &id,Qeapp::Meta &meta,String *why) const{
  // Reverify at use-time: removable SD may have changed after listing.
- for(int i=0;i<used;i++)if(id==installed[i].info.id){String error;return verifyInstalled(id,meta,error);}
+ for(int i=0;i<used;i++)if(id==installed[i].info.id){
+   String error;const bool ok=verifyInstalled(id,meta,error);
+   if(why) *why=ok?String():error;
+   return ok;
+ }
+ if(why) *why="App not in catalog; rescan Apps or remount SD";
  return false;
 }
 
 bool AppInstallerService::install(const String &pkg,Qeapp::Meta &result,String &error){
  // QEAPP/2 is not a native/SIS loader. Signed, declarative web/text apps only.
+ InstallTraceGuard traceGuard;
  progressCopied=progressTotal=0;lastProgress=0;
+#if defined(ARDUINO_ARCH_ESP32)
+ const size_t internal=heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+ const size_t largest=heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+ if(internal < 32U*1024U || largest < 16U*1024U){
+   error="Low internal RAM: close tasks and retry";
+   Serial.printf("[QEAPP][INSTALL][OOM_PRECHECK] internal=%u largest=%u\n",unsigned(internal),unsigned(largest));
+   return false;
+ }
+#endif
  progress(0,"Verifying package signature");
  if(!inspect(pkg,result,error))return false;
+ traceInstall(20,"source_signature_verified");
  progress(5,"Checking installed version");
  const String id(result.id),finalDir=installedPath(id);
  const String stage=String(StoragePaths::APPS_INSTALLED)+"/.stage-"+id;
  const String backup=String(StoragePaths::APPS_INSTALLED)+"/.backup-"+id;
+ traceInstall(25,"catalog_recovery_begin");
  refresh();  // also attempts to complete a previously interrupted update
+ traceInstall(30,"catalog_recovered");
  fs::FS &fs=card->fs();
  bool upgrade=false;
  if(fs.exists(finalDir)){
@@ -319,6 +430,7 @@ bool AppInstallerService::install(const String &pkg,Qeapp::Meta &result,String &
  if(card->freeBytes()<required){error="Insufficient SD space for staging";in.close();return false;}
  if(!fs.mkdir(stage)){error="Cannot create staging directory";in.close();return false;}
  progressCopied=0;progressTotal=h.manifestLen+h.iconLen+h.payloadLen;
+ traceInstall(40,"staging_directory_created");
  progress(10,"Preparing staging directory");
  uint8_t headerRaw[Qeapp::HEADER_BYTES];
  if(!in.seek(0)||in.read(headerRaw,sizeof headerRaw)!=(int)sizeof headerRaw){
@@ -341,7 +453,9 @@ bool AppInstallerService::install(const String &pkg,Qeapp::Meta &result,String &
    if(receipt){receipt.flush();receipt.close();}
  }
  in.close();
+ if(ok)traceInstall(50,"copy_complete");
  if(ok){
+   traceInstall(55,"reverify_source_begin");
    progress(78,"Verifying signed staging copy");
    // Recheck the source in case SD bytes changed between inspect and copy.
    File reread=fs.open(pkg,FILE_READ);Qeapp::Header fresh;Qeapp::Meta freshMeta;
@@ -361,6 +475,7 @@ bool AppInstallerService::install(const String &pkg,Qeapp::Meta &result,String &
    if(reread)reread.close();
  }
  if(ok){
+   traceInstall(60,"verify_staged_receipt_begin");
    Qeapp::Meta staged;String why;
    if(!verifyDirectory(stage,id,staged,why)){
      error=String("Staged signature check failed: ")+why;ok=false;
@@ -369,6 +484,7 @@ bool AppInstallerService::install(const String &pkg,Qeapp::Meta &result,String &
  if(!ok){cleanKnownFiles(stage);return false;}
  // FAT is NOT fully power-fail atomic. On reboot refresh() can restore a
  // complete, signed .backup-id when final is missing/incomplete.
+ traceInstall(70,"activation_rename_begin");
  progress(91,upgrade?"Saving previous app version":"Activating new app");
  if(upgrade&&!fs.rename(finalDir,backup)){
    error="Cannot preserve old version";cleanKnownFiles(stage);return false;
@@ -378,6 +494,7 @@ bool AppInstallerService::install(const String &pkg,Qeapp::Meta &result,String &
    if(upgrade&&!fs.rename(backup,finalDir))error=error+"; recover on next boot";
    cleanKnownFiles(stage);return false;
  }
+ traceInstall(80,"final_integrity_check_begin");
  Qeapp::Meta committed;String verifyError;
  if(!verifyInstalled(id,committed,verifyError)){
    error=String("Activated version failed integrity check: ")+verifyError;
@@ -387,11 +504,12 @@ bool AppInstallerService::install(const String &pkg,Qeapp::Meta &result,String &
    refresh();return false;
  }
  result=committed;
+ traceInstall(90,"catalog_refresh_begin");
  progress(97,"Refreshing applications catalog");
  // Cleanup is best effort: a backup left behind is a *verified* old app,
  // not permission to erase unexpected files. refresh() will retry next boot.
  if(upgrade)cleanKnownFiles(backup);
- refresh();error="";progress(100,"Application ready");return true;
+ refresh();traceInstall(100,"install_complete");error="";progress(100,"Application ready");return true;
 }
 
 bool AppInstallerService::uninstall(const String &id,String &error){
@@ -410,10 +528,19 @@ bool AppInstallerService::uninstall(const String &id,String &error){
 
 bool AppInstallerService::loadIcon(const String &id,uint16_t out[1024]){
  if(!out||!card||!card->mounted()||!safeId(id))return false;
- Qeapp::Meta entry;if(!get(id,entry)||!entry.hasIcon)return false;
+ const Installed *trusted=nullptr;
+ for(int i=0;i<used;i++)if(id==installed[i].info.id){trusted=&installed[i];break;}
+ if(!trusted||!trusted->info.hasIcon)return false;
  File f=card->fs().open(installedPath(id)+"/icon.rgb565",FILE_READ);
  if(!f||f.size()!=Qeapp::ICON_BYTES){if(f)f.close();return false;}
- bool ok=f.read(reinterpret_cast<uint8_t*>(out),Qeapp::ICON_BYTES)==(int)Qeapp::ICON_BYTES;f.close();return ok;
+ const bool readOk=f.read(reinterpret_cast<uint8_t*>(out),Qeapp::ICON_BYTES)==(int)Qeapp::ICON_BYTES;
+ f.close();
+ if(!readOk)return false;
+ Qeapp::Sha256 hash;uint8_t digest[32];
+ hash.update(reinterpret_cast<const uint8_t*>(out),Qeapp::ICON_BYTES);
+ hash.finish(digest);
+ // Do NOT cache arbitrary SD icon contents or drop signing on launch.
+ return Qeapp::equalHash(digest,trusted->verifiedIconHash);
 }
 
 bool AppInstallerService::previewIcon(const String &pkg,uint16_t out[1024]){

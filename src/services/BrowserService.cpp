@@ -171,6 +171,16 @@ bool BrowserService::resolveUrl(const char *base, const char *href, char *out, s
   return n > 0 && (size_t)n < sizeof(absolute) && copyUrl(out, cap, absolute);
 }
 
+BrowserService::~BrowserService() {
+  // heap_caps_malloc (PSRAM) and malloc fallback are both released by free
+  // on ESP32. No render work should access these pools after destruction.
+  if (lines) free(lines);
+  if (links) free(links);
+  if (history) free(history);
+  lines = nullptr; links = nullptr; history = nullptr;
+  poolsReady = false;
+}
+
 bool BrowserService::begin(StorageService *storageRef) {
   storage = storageRef;
   if (!poolsReady) {
@@ -427,7 +437,7 @@ void BrowserService::pushHistory(const char *url) {
   if (!history || !url || !url[0]) return;
   if (historyUsed && !strcmp(history[0], url)) return;
   int last = min(historyUsed, HISTORY_MAX - 1);
-  for (int i = last; i > 0; --i) snprintf(history[i], sizeof(history[i]), "%s", history[i - 1]);
+  for (int i = last; i > 0; --i) memmove(history[i], history[i - 1], sizeof(history[0]));
   snprintf(history[0], sizeof(history[0]), "%s", url);
   if (historyUsed < HISTORY_MAX) ++historyUsed;
 }
@@ -454,7 +464,7 @@ bool BrowserService::goBack() {
   char target[192]; snprintf(target, sizeof(target), "%s", history[1]);
   // Leave history untouched on transport/TLS errors. The user can retry.
   if (!fetchAndParse(target, false)) return false;
-  for (int i = 1; i < historyUsed - 1; ++i) snprintf(history[i], sizeof(history[i]), "%s", history[i + 1]);
+  for (int i = 1; i < historyUsed - 1; ++i) memmove(history[i], history[i + 1], sizeof(history[0]));
   --historyUsed;
   return true;
 }

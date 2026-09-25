@@ -26,6 +26,8 @@ inline int digitalRead(int pin){return pin>=0&&pin<64?vqeafFakePinState[pin]:HIG
 #else
 inline uint32_t millis(){return 0;} inline void delay(uint32_t){} inline void pinMode(int,int){} inline int digitalRead(int){return HIGH;}
 #endif
+inline uint32_t micros(){return millis()*1000U;}
+inline void yield(){}
 inline void digitalWrite(int,int){} inline void analogWrite(int,int){}
 template <class T, class A, class B> inline T constrain(T x,A a,B b){T aa=(T)a, bb=(T)b; return x<aa?aa:(x>bb?bb:x);} inline long map(long x,long in_min,long in_max,long out_min,long out_max){return (x-in_min)*(out_max-out_min)/(in_max-in_min)+out_min;}
 class String {

@@ -53,13 +53,15 @@ KeyEvent InputManager::poll() {
         b.pressedAt = now;
         b.repeatedAt = now;
         b.longSent = false;
-        // Defer SELECT click until release. Otherwise holding it to switch
-        // mode would first activate the selected launcher item by mistake.
-        if(b.key==Key::Select)return KeyEvent();
+        // MENU and SELECT are the only system-wide dual-purpose keys. Defer
+        // their short click until release; holding MENU may open Tasks, while
+        // SELECT hold switches T9. START/OPTION/A/B remain immediate clicks,
+        // never followed by a second global long-press navigation.
+        if(b.key==Key::Select || b.key==Key::Menu)return KeyEvent();
         return KeyEvent(dispatchKey(b.key), true, false, false);
       }
-      if (b.key==Key::Select && !b.longSent)
-        return KeyEvent(dispatchKey(Key::Select),true,false,false);
+      if ((b.key==Key::Select || b.key==Key::Menu) && !b.longSent)
+        return KeyEvent(dispatchKey(b.key),true,false,false);
     }
 
     if (!b.stableHigh && repeatable(b.key) &&
@@ -70,7 +72,8 @@ KeyEvent InputManager::poll() {
       return KeyEvent(b.key, true, false, true);
     }
 
-    if (!b.stableHigh && !repeatable(b.key) && !b.longSent && (now - b.pressedAt) >= LONG_MS) {
+    if (!b.stableHigh && (b.key==Key::Select || b.key==Key::Menu) &&
+        !b.longSent && (now - b.pressedAt) >= LONG_MS) {
       b.longSent = true;
       if(b.key==Key::Select)numericMode=!numericMode;
       return KeyEvent(b.key, true, true, false);

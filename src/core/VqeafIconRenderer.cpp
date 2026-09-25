@@ -1,6 +1,14 @@
 #if defined(VQEAF_ICON_BASELINE)
 // Frozen v2.3.4 renderer and embedded data. Same full OS, different icon only.
 #include "../../docs/verification/v234_baseline/VqeafIconRenderer.cpp"
+// Maintain the historical Flash-size comparison build with the new UI calls.
+// It intentionally uses the original draw path, not the optimized renderer.
+namespace VqeafIcons {
+bool drawOpaque(TFT_eSPI &tft, Id id, int16_t x, int16_t y,
+                uint8_t size, uint16_t background) {
+  return draw(tft,id,x,y,size,background,Palette::standard(),true);
+}
+}
 #else
 #include "VqeafIconRenderer.h"
 #include "VqeafIconData.h"
@@ -131,6 +139,62 @@ bool draw(TFT_eSPI &tft, Id id, int16_t x, int16_t y, uint8_t size,
   if (clearBackground) tft.fillRect(x, y, size, size, background);
   DrawDestination dest = {&tft, x, y};
   return decode(a, drawSpan, &dest);
+}
+
+// A scanline compositor is deliberately stack-only: max 36x2 bytes. It
+// streams whole opaque RGB565 rows and batches their SPI transfer, avoiding
+// one display transaction for every compressed pixel span. Background is
+// filled per row: transparent/cropped pixels match draw(clear=true) exactly.
+struct OpaqueScanline {
+  TFT_eSPI &tft;
+  int16_t x, y;
+  uint8_t size;
+  uint16_t background;
+  uint16_t pixels[36];
+  uint8_t nextRow;
+
+  void clearRow() {
+    for (uint8_t col = 0; col < size; ++col) pixels[col] = background;
+  }
+  void flush() {
+    tft.pushImage(x, y + nextRow, size, 1, pixels);
+    ++nextRow;
+    clearRow();
+  }
+  static void span(void *ptr, uint8_t sx, uint8_t sy, uint8_t n, uint16_t color) {
+    auto &self = *static_cast<OpaqueScanline *>(ptr);
+    // Decoder is ordered top-to-bottom, left-to-right. Fill skipped rows too.
+    while (self.nextRow < sy) self.flush();
+    if (self.nextRow != sy || sx + n > self.size) return;
+    for (uint8_t col = 0; col < n; ++col) self.pixels[sx + col] = color;
+  }
+};
+
+bool drawOpaque(TFT_eSPI &tft, Id id, int16_t x, int16_t y, uint8_t size,
+                uint16_t background) {
+#if defined(VQEAF_ICON_FAST_ROWS_DISABLE)
+  // A/B field diagnostic: retain exactly the old per-span rendering path.
+  return draw(tft,id,x,y,size,background,Palette::standard(),true);
+#else
+  const uint8_t i = static_cast<uint8_t>(id);
+  if (i >= 12 || (size != 24 && size != 36)) return false;
+  const auto &asset = size == 24 ? VqeafIconData::ICONS_24[i] : VqeafIconData::ICONS_36[i];
+  if (!valid(asset, size)) return false;
+  OpaqueScanline rows = {tft, x, y, size, background, {}, 0};
+  rows.clearRow();
+  // All drawing in this scope is TFT-only; no SD/WiFi I/O or yielding while
+  // the SPI write transaction is open. The board uses one TFT SPI client.
+  const bool oldSwap = tft.getSwapBytes();
+  // Row pixels are normal CPU-endian RGB565 from the embedded palette.
+  // TFT_eSPI pushImage() needs byte swapping for ST7789 SPI output.
+  tft.setSwapBytes(true);
+  tft.startWrite();
+  const bool ok = decode(asset, OpaqueScanline::span, &rows);
+  if (ok) while (rows.nextRow < size) rows.flush();
+  tft.endWrite();
+  tft.setSwapBytes(oldSwap);
+  return ok;
+#endif
 }
 
 #if defined(VQEAF_ICON_SELFTEST)

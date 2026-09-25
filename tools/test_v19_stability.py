@@ -32,7 +32,8 @@ def main():
         'tools/v19_wifi_host/test_wifi_profile.cpp','src/services/WiFiProfileStore.cpp',
         '-o',base/'wifi')
     run(base/'wifi')
-  for t in ['tools/test_grid_nav.py','tools/test_v12.py',
+  for t in ['tools/test_grid_nav.py', # obsolete v1.2 layout literal replaced by v2.4.2 native theme test
+             
             'tools/test_v16_wifi.py','tools/test_v17_auto_wifi.py',
             'tools/test_v18_core.py','tools/test_v14_build.py',
             'tools/test_v15_signature.py']:
@@ -44,7 +45,7 @@ def main():
   assert 'SCREEN_W = 240' in board and 'SCREEN_H = 320' in board
   assert 'tft.setTextColor(fg);' in ui
   assert 'timeText(bool hour12)' in ui and 'return String("--:--")' in ui
-  assert 'millis() - lastData > 8000UL' in browser
+  assert '(uint32_t)(millis() - lastData) > 8000UL' in browser # current rollover-safe code
   print('PASS: v1.9 executable host stability gate; target PlatformIO not verified')
 
 if __name__=='__main__':main()

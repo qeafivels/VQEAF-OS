@@ -53,6 +53,11 @@ int main(int argc,char **argv) {
     // UTF-8 BOM accepted even for first magic line.
     fakeThemeFiles["/Themes/bom.vqeaf"] =
       "\xEF\xBB\xBF@vqeaf 1.0\n<theme name=\"BOM file\">\npalette {\nscreen: \"#123456\"\nkeyText: \"#FFFFFF\"\naccent: \"#FF0000\"\n}\n</theme>\n";
+    // A valid theme in a deeply nested File Manager folder is NOT scanned by
+    // the bounded catalog, but direct selection must still load/apply it.
+    fakeThemeFiles["/Documents/Custom/Nested/Palette/deep.vqeaf"] =
+      "@vqeaf 1.0\n<theme name=\"Deep theme\">\npalette {\n"
+      "screen: \"#123456\"\nkeyText: \"#FFFFFF\"\naccent: \"#206040\"\n}\n</theme>\n";
     StorageService sd; assert(sd.begin());
     ThemeFileService service; int count=service.scan(sd);
     assert(service.hasCard() && count == 4); // huge excluded, duplicates removed
@@ -76,6 +81,9 @@ int main(int argc,char **argv) {
     assert(c.bg == rgb(16,16,32) && c.accent == rgb(32,80,221));
     assert(service.load(sd,"/Themes/bom.vqeaf",c,title,error));
     assert(c.bg == rgb(18,52,86));
+    assert(service.find("/Documents/Custom/Nested/Palette/deep.vqeaf") < 0);
+    assert(service.load(sd,"/Documents/Custom/Nested/Palette/deep.vqeaf",c,title,error));
+    assert(title == "Deep theme" && c.bg == rgb(18,52,86));
     ThemeColors snapshot = c;
     assert(!service.load(sd,"/Themes/bad.vqeaf",c,title,error));
     assert(c.bg == snapshot.bg && c.text == snapshot.text);

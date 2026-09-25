@@ -15,6 +15,11 @@ public:
  uint16_t fg=0xffff,bg=0;
  int cx=0,cy=0,family=1,scale=1,fullFills=0,partialRects=0;
  bool transparent=false;
+ bool swapBytes=false;
+ bool getSwapBytes()const{return swapBytes;}
+ void setSwapBytes(bool b){swapBytes=b;}
+ void startWrite(){} void endWrite(){}
+ void pushImage(int x,int y,int w,int h,const uint16_t *a){for(int row=0;row<h;++row)for(int col=0;col<w;++col)point(x+col,y+row,a[row*w+col]);}
  TFT_eSPI():fb(240*320,0){}
  void init(){}void setRotation(int){}void setTextWrap(bool){};
  void setTextFont(int n){family=n;}void setTextSize(int n){scale=n;}

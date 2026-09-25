@@ -113,6 +113,7 @@ private:
   // refreshed on every list redraw or navigation frame.
   uint16_t cachedIcon[1024]={0};
   char cachedIconId[25]={0};
+  uint32_t cachedIconRevision=0;
   bool cachedIconValid=false;
   const uint16_t *selectedIcon(AppContext &ctx,const LauncherRow &row);
   int fillRows(AppContext &ctx, LauncherRow out[MAX_ROWS]) const;
@@ -267,6 +268,7 @@ private:
   uint32_t nextOffset = 0;
   int count = 0, index = 0, offset = 0, lineCount = 0, page = 0;
   bool viewing = false;
+  String packageOpenError;
   ScreenId returnTo = ScreenId::Applications;
   PopupState popup;
   bool loadPage(AppContext &ctx, uint32_t fileOffset);
@@ -334,7 +336,13 @@ private:
   PopupState popup;
   bool showDetails = false;
   String feedback;
-  int total(const AppContext &ctx) const { return BUILTIN_COUNT + ctx.themes.count(); }
+  String directThemePath; // valid .vqeaf opened outside the bounded SD catalog
+  String directThemeName;
+  int total(const AppContext &ctx) const {
+    return BUILTIN_COUNT + ctx.themes.count() + (directThemePath.length() ? 1 : 0);
+  }
+  String themePath(const AppContext &ctx, int item) const;
+  String themeTitle(const AppContext &ctx, int item) const;
   bool apply(AppContext &ctx);
 };
 
@@ -364,15 +372,16 @@ private:
   // A single icon preview; cache between partial UI redraws rather than
   // repeatedly hashing the package whenever a softkey is pressed.
   bool previewIconReady = false;
-  uint16_t previewPixels[1024];
-  void reload(AppContext &ctx);
+  bool resultCanOpen = false;
+  char resultAppId[25] = {};
+  void reload(AppContext &ctx, bool forceCatalogRefresh = true);
   void openDetails(AppContext &ctx);
   void paintRow(AppContext &ctx, int item, bool selected);
 };
 
 class ApplicationsApp {
 public:
-  void enter(AppContext &ctx) { ctx.installer.refresh(); index = 0; offset = 0; popup.close(); }
+  void enter(AppContext &ctx) { ctx.installer.refreshIfNeeded(); index = 0; offset = 0; popup.close(); }
   void draw(AppContext &ctx);
   ScreenId handle(AppContext &ctx, const KeyEvent &e);
 private:

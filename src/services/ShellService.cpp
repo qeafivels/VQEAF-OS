@@ -1,4 +1,5 @@
 #include "ShellService.h"
+#include "../core/BuildVersion.h"
 #include "NotificationService.h"
 #include "WiFiConnectionService.h"
 #include <WiFi.h>
@@ -624,7 +625,7 @@ void ShellService::execute(const String &input, NotificationService &notificatio
   if (cmd == "help" || cmd == "?") commandHelp();
   else if (cmd == "clear" || cmd == "cls") clear();
   else if (cmd == "uname") push("VQEAF-OS ESP32-S3 Xtensa LX7");
-  else if (cmd == "version") push("VQEAF OS v2.4.2");
+  else if (cmd == "version") push(VQEAF_OS_VERSION_TEXT);
   else if (cmd == "uptime") push(systemService ? systemService->uptimeText() : String(millis() / 1000UL) + "s");
   else if (cmd == "free") {
     push(String("heap free: ") + String((unsigned long)ESP.getFreeHeap()));

@@ -33,6 +33,8 @@ int main(){
   key(Board::KEY_SELECT,false);input.poll();tick(30);assert(input.poll().key==Key::None);
   input.setTextInputActive(false);
   key(Board::KEY_MENU,true);input.poll();tick(30);
+  assert(input.poll().key==Key::None); // v2.4.3 MENU short click is deferred until release
+  key(Board::KEY_MENU,false);input.poll();tick(30);
   e=input.poll();assert(e.key==Key::Menu); // normal Home still works outside editor
   std::cout<<"PASS input: SELECT hold toggle, deferred short press, T9 multitap, Home nav\n";
 }

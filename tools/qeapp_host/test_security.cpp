@@ -46,6 +46,12 @@ int main(int argc,char **argv) {
   // Verify exact bytes of installed payload at point of launch, not only install.
   const std::string goodOnSd="/System/Apps/Inbox/good.qeapp";
   writeBytes(base+goodOnSd,good);
+  // Explicit File Manager imports are allowed from any absolute card path,
+  // but must not accept traversal or Windows-style separator tricks.
+  assert(!apps.inspect("/System/Apps/Inbox/../Inbox/good.qeapp",meta,error));
+  assert(error=="Expected safe absolute .qeapp file path");
+  assert(!apps.inspect("/System/Apps/Inbox/\\good.qeapp",meta,error));
+  assert(error=="Expected safe absolute .qeapp file path");
   assert(apps.inspect(goodOnSd.c_str(),meta,error));
   assert(apps.install(goodOnSd.c_str(),meta,error));
   assert(apps.count()==1);

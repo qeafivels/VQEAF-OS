@@ -19,6 +19,12 @@ struct BrowserLink {
 // engine and no allocation in the input loop.
 class BrowserService {
 public:
+  // Owns one fixed pool set; release it on host teardown. The firmware's
+  // global BrowserService retains its pools for the entire OS lifetime.
+  BrowserService() = default;
+  ~BrowserService();
+  BrowserService(const BrowserService &) = delete;
+  BrowserService &operator=(const BrowserService &) = delete;
   static constexpr int MAX_LINES = 84;
   static constexpr int MAX_LINKS = 24;
   static constexpr int HISTORY_MAX = 8;

@@ -136,7 +136,8 @@ String SymbianUI::fitTextPixels(const String &label,uint8_t font,int maxPx) {
 
 String SymbianUI::timeText(bool hour12) {
   struct tm info;
-  if (getLocalTime(&info, 5)) {
+  const time_t now = time(nullptr);
+  if (now >= 1640995200 && localtime_r(&now, &info)) {
     char b[12];
     if (hour12) strftime(b, sizeof(b), "%I:%M %p", &info);
     else strftime(b, sizeof(b), "%H:%M", &info);
@@ -514,7 +515,7 @@ void SymbianUI::drawIcon(int x, int y, const String &kind, uint16_t color) {
   drawS60MenuIcon(x, y, kind, color);
 }
 
-void SymbianUI::listItem(int row, const String &icon, const String &title, const String &sub, bool selected) {
+void SymbianUI::listItem(int row, const String &icon, const String &title, const String &sub, bool selected, bool showIcon) {
   if (row < 0 || row >= LIST_VISIBLE) return;
   const int y = CONTENT_TOP + 1 + row * LIST_ROW_H;
   const uint16_t bg = selected ? colors.selected : colors.bg;
@@ -526,10 +527,12 @@ void SymbianUI::listItem(int row, const String &icon, const String &title, const
 
   // All twelve core glyphs use the hand-rastered 24x24 variant in lists;
   // extra v2.3 glyphs keep their existing, source-compatible 36px fallback.
-  const VqeafIcons::Id standardId=VqeafIcons::fromLegacy(UiIconCatalog::canonical(icon.c_str()));
-  if (standardId != VqeafIcons::Id::Count)
-    VqeafIcons::draw(tft, standardId, 12, y + 9, 24, bg, VqeafIcons::Palette::standard());
-  else drawIcon(7, y + 3, icon, bg);
+  if (showIcon) {
+    const VqeafIcons::Id standardId=VqeafIcons::fromLegacy(UiIconCatalog::canonical(icon.c_str()));
+    if (standardId != VqeafIcons::Id::Count)
+      VqeafIcons::drawOpaque(tft, standardId, 12, y + 9, 24, bg);
+    else drawIcon(7, y + 3, icon, bg);
+  }
 
   const uint16_t labelInk = selected ? selectedInk : colors.text;
   tft.setTextColor(labelInk, bg);
@@ -591,8 +594,7 @@ void SymbianUI::gridItem(int slot, const String &icon, const String &title, bool
   const VqeafIcons::Id requested = VqeafIcons::fromLegacy(
       UiIconCatalog::canonical(icon.c_str()));
   if (expected != VqeafIcons::Id::Count && expected == requested) {
-    if (!VqeafIcons::draw(tft, expected, iconX, iconY, 36, bg,
-                          VqeafIcons::Palette::standard()))
+    if (!VqeafIcons::drawOpaque(tft, expected, iconX, iconY, 36, bg))
       drawIcon(iconX, iconY, icon, bg);
   } else {
     drawIcon(iconX, iconY, icon, bg);
@@ -868,8 +870,7 @@ void SymbianUI::idleShortcutTile(int i, bool selected) {
   // The shortcuts are centered using the same pixel contract as the atlas.
   const VqeafIcons::Id id = UiIconCatalog::homeAsset(i);
   const int iconX = r.x + (r.w - ICON_BOX) / 2;
-  if (!VqeafIcons::draw(tft, id, iconX, r.y + 6, 36, bg,
-                        VqeafIcons::Palette::standard()))
+  if (!VqeafIcons::drawOpaque(tft, id, iconX, r.y + 6, 36, bg))
     drawIcon(iconX, r.y + 6, labels[i], bg);
   tft.setTextSize(1);
   const uint16_t fg=selected?selectedInk:colors.text;
@@ -970,7 +971,8 @@ void SymbianUI::clockFace(bool hour12, bool full) {
 
 String SymbianUI::dateText() {
   struct tm info;
-  if (getLocalTime(&info, 5)) {
+  const time_t now = time(nullptr);
+  if (now >= 1640995200 && localtime_r(&now, &info)) {
     char b[24];
     strftime(b, sizeof(b), "%a %d %b", &info);
     return String(b);

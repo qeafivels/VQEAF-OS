@@ -10,9 +10,11 @@ struct JpegCtx {
   int x = 0, y = 0, right = 0, bottom = 0;
 };
 static JpegCtx jpgCtx;
+static uint32_t jpgBlocks = 0;
 
 static bool jpegOutput(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap) {
   if (!jpgCtx.tft || !bitmap) return false;
+  if ((++jpgBlocks & 15U) == 0U) yield();
   const int dx = jpgCtx.x + x;
   const int dy = jpgCtx.y + y;
   if (dy >= jpgCtx.bottom || dx >= jpgCtx.right) return false;
@@ -41,6 +43,7 @@ struct PngCtx {
   int srcW = 0, srcH = 0, outW = 0, outH = 0, x = 0, y = 0;
 };
 static PngCtx pngCtx;
+static uint32_t pngRows = 0;
 static PNG *pngObj = nullptr;
 static uint16_t pngLine[1024];
 static uint16_t scaledLine[240];
@@ -56,6 +59,7 @@ static PNG *getPngObject() {
 
 static int pngDraw(PNGDRAW *draw) {
   if (!pngCtx.tft || !pngCtx.png || !draw || pngCtx.srcW < 1 || pngCtx.srcW > 1024) return 1;
+  if ((++pngRows & 15U) == 0U) yield();
   pngCtx.png->getLineAsRGB565(draw, pngLine, PNG_RGB565_LITTLE_ENDIAN, 0xFFFFFFFF);
   int oy = (draw->y * pngCtx.outH) / pngCtx.srcH;
   int nextOy = ((draw->y + 1) * pngCtx.outH) / pngCtx.srcH;
@@ -107,6 +111,7 @@ bool ImageViewerService::drawJpeg(TFT_eSPI &tft, fs::FS &fs, const String &path,
   while (scale < 8 && ((sw/scale) > w || (sh/scale) > h)) scale <<= 1;
   int ow=max(1,(int)sw/scale), oh=max(1,(int)sh/scale);
   jpgCtx.tft=&tft; jpgCtx.x=x+(w-ow)/2; jpgCtx.y=y+(h-oh)/2; jpgCtx.right=x+w; jpgCtx.bottom=y+h;
+  jpgBlocks = 0;
   TJpgDec.setCallback(jpegOutput);
   TJpgDec.setJpgScale(scale);
   tft.setSwapBytes(true);
@@ -140,6 +145,7 @@ bool ImageViewerService::drawPng(TFT_eSPI &tft, fs::FS &fs, const String &path,
   ow=constrain(ow,1,min(w,240)); oh=constrain(oh,1,h);
   pngCtx.tft=&tft; pngCtx.png=png; pngCtx.srcW=sw; pngCtx.srcH=sh; pngCtx.outW=ow; pngCtx.outH=oh;
   pngCtx.x=x+(w-ow)/2; pngCtx.y=y+(h-oh)/2;
+  pngRows = 0;
   rc=png->decode(nullptr,0);
   png->close();
   pngCtx.tft=nullptr; pngCtx.png=nullptr;
@@ -177,6 +183,7 @@ bool ImageViewerService::drawBmp(TFT_eSPI &tft, fs::FS &fs, const String &path,
       out[ox]=tft.color565(p[2],p[1],p[0]);
     }
     tft.pushImage(dx,dy+oy,ow,1,out);
+    if ((oy & 15) == 15) yield();
   }
   free(row); free(out); f.close(); return true;
 }

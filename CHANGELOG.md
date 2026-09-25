@@ -1,3 +1,22 @@
+## v2.5.1 (2026-09-25) — QEAPP launch/icon fixes and device performance instrumentation
+
+- Single-pass cryptographically verified selected package+icon preview; retained independent install/launch verification.
+- Correct signed QEAPP icon RGB565 wire byte-order consistently in Apps, Installer and Explorer; fix list-row icon placement.
+- Cached icon SHA per verified catalog, on-demand 2KB-only icon rehash, catalog revision invalidation; share one icon scratch across installer/apps.
+- Add post-install Open action and visible launch diagnostics; reduce expensive catalog scans/transition frames.
+- Opt-in real ESP32-S3 metrics for rendered Snake updates, navigation and input dispatch, minimum observed RAM/PSRAM; Serial parser and transition A/B build profiles.
+- Host tests and target validation protocol in docs/V251_QEAPP_GRAPHICS_MEMORY_PERF_VN.md. No physical board test claimed.
+
+## [2.5.0] — Feature-phone UI / graphics response (host candidate)
+
+- Opaque 24/36px icon scanline streaming (72-byte stack row, one batched TFT transaction/icon); original transparent renderer and A/B compatibility profile retained.
+- RGB565 byte-order restoration; Home/Menu/list switched only on flat-background system icon paths.
+- Non-blocking wall-clock formatting and shorter Opening interstitial (170ms -> 32ms).
+- Cooperative yields during long JPEG/PNG/BMP decode callbacks.
+- Opt-in `vqeaf_perf_diag` with real-board loop-latency and heap telemetry; mock test cannot establish FPS.
+- No hardware GPIO, signature key, QEAPP/2 package, or VQEAF theme contract changed.
+- Tests and board protocol: `docs/FEATURE_PHONE_RENDER_CORE_V250_VN.md`.
+
 ## v2.4.2 — Verified QEAPP, network downloads and theme recovery (2026-09-24)
 
 - Discover signed `.qeapp` files in inbox, Downloads and the microSD root, with
@@ -407,3 +426,11 @@ Earlier versions: v1.3 SD Platform, v1.2 Themes, v1.1 AMOLED Red, v1.0 S60 Green
   a measurement script that does not claim whole-firmware savings until both
   target builds produce real .bin and .elf artifacts.
 - Unchanged hardware mapping, portrait layout, vqeaf themes and qeapp format.
+
+## v2.4.3 — Hardware-video-driven installer/theme navigation fix
+
+- Fix: non-deferred START hold no longer invokes global Music after first click already selected an app or theme; MENU is a true release/hold gesture, SELECT retains T9 toggle.
+- Fix: fast direct file `.qeapp` inspection; strict absolute path validation; specific error when Snake demo signing key mismatches production firmware; wrapped on-device rejection text.
+- Fix: allow direct application of valid `.vqeaf` opened in File Manager outside bounded theme catalog, preserve selection across rescan, do not modify theme/NVS on invalid file.
+- Add: `[VQEAF]` serial breadcrumbs, hardware-video-focused fake GPIO/time regression, additional theme/installer path tests, Serial capture script and device retest checklist.
+- Scope: host tests and compile/link mocks only; real PlatformIO firmware build/physical device outcome remain unverified.

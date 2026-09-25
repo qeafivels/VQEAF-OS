@@ -1,5 +1,6 @@
 #include "QeappSignature.h"
 #include <string.h>
+#include <stdio.h>
 #if defined(VQEAF_SNAKE_DEMO_KEY)
 #include "SnakeDemoTrustKey.h"
 #elif defined(QEAPP_TRUST_KEY_HEADER)
@@ -27,7 +28,18 @@ static uint32_t readKeyId(const uint8_t *b) {
 bool verifySignature(const uint8_t digest[32],const uint8_t trailer[SIGNATURE_BYTES],const char *&error){
  error="";
  if(!digest||!trailer||memcmp(trailer,"QSIGP256",8)){error="Missing/invalid QEAPP signature";return false;}
- if(readKeyId(trailer+8)!=QEAPP_TRUST_KEY_ID){error="Unknown signing key ID";return false;}
+ const uint32_t packageKey=readKeyId(trailer+8);
+ if(packageKey!=QEAPP_TRUST_KEY_ID){
+   // This is not a signature bypass. Explain why the separately signed
+   // Pixel Snake demo cannot install on the production firmware profile.
+   static char keyError[96];
+   if(packageKey==0x534e414bu)
+     snprintf(keyError,sizeof keyError,"Unknown signing key ID: Snake demo needs vqeaf_snake_demo");
+   else
+     snprintf(keyError,sizeof keyError,"Unknown signing key ID: package=%08lX firmware=%08lX",
+              (unsigned long)packageKey,(unsigned long)QEAPP_TRUST_KEY_ID);
+   error=keyError;return false;
+ }
  if(QEAPP_TRUST_PUBKEY[0]!=0x04||sizeof(QEAPP_TRUST_PUBKEY)!=65){error="Invalid built-in public key";return false;}
  const uint8_t *sig=trailer+12;
 #if defined(QEAPP_HOST_OPENSSL)

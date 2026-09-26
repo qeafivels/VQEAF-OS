@@ -303,7 +303,7 @@ private:
   PopupState popup;
   void loadHome(AppContext &ctx);
   void redrawBody(AppContext &ctx);
-  void redrawOverview(AppContext &ctx, bool forceFull=true);
+  bool redrawOverview(AppContext &ctx, bool forceFull=true);
   void resetMotion(AppContext &ctx);
   void moveLink(AppContext &ctx, int direction);
 };

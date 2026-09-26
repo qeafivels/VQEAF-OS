@@ -11,6 +11,7 @@
 constexpr int BrowserService::MAX_LINES;
 constexpr int BrowserService::MAX_LINKS;
 constexpr int BrowserService::HISTORY_MAX;
+constexpr int BrowserService::FORWARD_MAX;
 
 static void trimAscii(char *s) {
   if (!s) return;
@@ -187,8 +188,9 @@ BrowserService::~BrowserService() {
   if (lines) free(lines);
   if (links) free(links);
   if (history) free(history);
+  if (forward) free(forward);
   if (bookmarks) free(bookmarks);
-  lines = nullptr; links = nullptr; history = nullptr; bookmarks = nullptr;
+  lines = nullptr; links = nullptr; history = nullptr; forward = nullptr; bookmarks = nullptr;
   poolsReady = false;
 }
 
@@ -198,31 +200,35 @@ bool BrowserService::begin(StorageService *storageRef) {
     lines = (BrowserLine*)heap_caps_malloc(sizeof(BrowserLine) * MAX_LINES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     links = (BrowserLink*)heap_caps_malloc(sizeof(BrowserLink) * MAX_LINKS, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     history = (char (*)[192])heap_caps_malloc(sizeof(char[192]) * HISTORY_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    forward = (char (*)[192])heap_caps_malloc(sizeof(char[192]) * FORWARD_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     bookmarks = (char (*)[192])heap_caps_malloc(sizeof(char[192]) * BOOKMARK_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     // Fallback keeps the browser usable on boards where PSRAM init failed, but
     // Safe Mode can still be used if internal memory becomes constrained.
     if (!lines) lines = (BrowserLine*)malloc(sizeof(BrowserLine) * MAX_LINES);
     if (!links) links = (BrowserLink*)malloc(sizeof(BrowserLink) * MAX_LINKS);
     if (!history) history = (char (*)[192])malloc(sizeof(char[192]) * HISTORY_MAX);
+    if (!forward) forward = (char (*)[192])malloc(sizeof(char[192]) * FORWARD_MAX);
     if (!bookmarks) bookmarks = (char (*)[192])malloc(sizeof(char[192]) * BOOKMARK_MAX);
-    if (!lines || !links || !history || !bookmarks) {
+    if (!lines || !links || !history || !forward || !bookmarks) {
       if (lines) free(lines);
       if (links) free(links);
       if (history) free(history);
+  if (forward) free(forward);
       if (bookmarks) free(bookmarks);
-      lines = nullptr; links = nullptr; history = nullptr; bookmarks = nullptr; poolsReady = false;
+      lines = nullptr; links = nullptr; history = nullptr; forward = nullptr; bookmarks = nullptr; poolsReady = false;
       snprintf(errorText, sizeof(errorText), "Browser memory unavailable");
       return false;
     }
     for (int i = 0; i < MAX_LINES; ++i) new (&lines[i]) BrowserLine();
     for (int i = 0; i < MAX_LINKS; ++i) new (&links[i]) BrowserLink();
     memset(history, 0, sizeof(char[192]) * HISTORY_MAX);
+    memset(forward, 0, sizeof(char[192]) * FORWARD_MAX);
     memset(bookmarks, 0, sizeof(char[192]) * BOOKMARK_MAX);
     poolsReady = true;
   }
   resetPage();
   cachedPage = false;
-  historyUsed = 0; requestedUrl[0] = 0; retryPending = false;
+  historyUsed = 0; forwardUsed = 0; requestedUrl[0] = 0; retryPending = false;
   loadBookmarks();
   snprintf(currentUrl, sizeof(currentUrl), "%s", "https://qeafivels.com/");
   return true;
@@ -549,6 +555,8 @@ bool BrowserService::renderInternal(const char *url,bool addHistory) {
 void BrowserService::pushHistory(const char *url) {
   if (!history || !url || !url[0]) return;
   if (historyUsed && !strcmp(history[0], url)) return;
+  // Invalidate Forward only after a new navigation successfully loads.
+  forwardUsed = 0;
   int last = min(historyUsed, HISTORY_MAX - 1);
   for (int i = last; i > 0; --i) memmove(history[i], history[i - 1], sizeof(history[0]));
   snprintf(history[0], sizeof(history[0]), "%s", url);
@@ -573,12 +581,39 @@ bool BrowserService::reload() {
 }
 
 bool BrowserService::goBack() {
-  if (historyUsed < 2) return false;
-  char target[192]; snprintf(target, sizeof(target), "%s", history[1]);
-  // Leave history untouched on transport/TLS errors. The user can retry.
+  if (!history || !forward || historyUsed < 2) return false;
+  char target[192], previous[192];
+  snprintf(target, sizeof(target), "%s", history[1]);
+  snprintf(previous, sizeof(previous), "%s", history[0]);
+  // Navigation stack changes are transactional even if HTTP/TLS fails.
   if (!fetchAndParse(target, false)) return false;
-  for (int i = 1; i < historyUsed - 1; ++i) memmove(history[i], history[i + 1], sizeof(history[0]));
+  for (int i = 1; i < historyUsed - 1; ++i)
+    memmove(history[i], history[i + 1], sizeof(history[0]));
   --historyUsed;
+  const int last = min(forwardUsed, FORWARD_MAX - 1);
+  for (int i = last; i > 0; --i)
+    memmove(forward[i], forward[i - 1], sizeof(forward[0]));
+  snprintf(forward[0], sizeof(forward[0]), "%s", previous);
+  if (forwardUsed < FORWARD_MAX) ++forwardUsed;
+  return true;
+}
+
+bool BrowserService::goForward() {
+  if (!history || !forward || forwardUsed < 1) return false;
+  char target[192];
+  snprintf(target, sizeof(target), "%s", forward[0]);
+  if (!fetchAndParse(target, false)) return false;
+  // pushHistory would discard the rest of the Forward stack.
+  if (!historyUsed || strcmp(history[0], currentUrl)) {
+    const int last = min(historyUsed, HISTORY_MAX - 1);
+    for (int i = last; i > 0; --i)
+      memmove(history[i], history[i - 1], sizeof(history[0]));
+    snprintf(history[0], sizeof(history[0]), "%s", currentUrl);
+    if (historyUsed < HISTORY_MAX) ++historyUsed;
+  }
+  for (int i = 0; i < forwardUsed - 1; ++i)
+    memmove(forward[i], forward[i + 1], sizeof(forward[0]));
+  --forwardUsed;
   return true;
 }
 

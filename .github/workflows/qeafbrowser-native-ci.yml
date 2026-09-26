@@ -9,6 +9,7 @@ on:
       - 'tools/test_qeafbrowser_os.py'
       - 'tools/browser_parity_host.cpp'
       - 'tools/browser_overview_dirty_host.cpp'
+      - 'tools/test_browser_overview_integration.py'
       - 'tools/test_browser_feature_parity.py'
       - 'tools/test_browser_recovery_probe.py'
       - 'tools/test_browser_recovery_host.py'
@@ -38,6 +39,7 @@ jobs:
           /tmp/qb-parity-host
           g++ -std=c++11 -O2 -Wall -Wextra -Werror tools/browser_overview_dirty_host.cpp -o /tmp/qb-dirty-host
           /tmp/qb-dirty-host
+          python tools/test_browser_overview_integration.py
           python tools/test_browser_feature_parity.py
           python tools/test_browser_recovery_probe.py
           python tools/test_browser_recovery_host.py

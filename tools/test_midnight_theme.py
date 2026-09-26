@@ -31,6 +31,8 @@ checks={
  "Midnight ASCII AND UTF-8 share one DejaVu-based raster":
     ui.count('themeId==ThemeId::ModernDark || UiVietnameseFont::hasUtf8')>=4 and
     "UiVietnameseFont::measure(text.c_str()" in ui,
+ "Prominent 2x modern clock uses the same safe DejaVu bitmap":
+    "inline int drawScaled(" in glyphs and ui.count("UiVietnameseFont::drawScaled(")>=3,
  "Chronometer, main menu, footer and lists use modern font metrics":
     "textWidth(center,UiTypography::BODY)" in ui and
     "textWidth(topTime,UiTypography::MICRO)" in ui and

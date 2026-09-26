@@ -38,6 +38,9 @@ checks={
     "fitTextPixels(ttl, UiTypography::BODY" in ui,
  "No initial Classic splash and no manual theme resets needed":
     "ThemeId themeId = ThemeId::ModernDark;" in (r/"src/core/SymbianUI.h").read_text(encoding="utf-8"),
+ "COM3 read-only theme mode acceptance":
+    'diag theme status' in (r/"src/main.cpp").read_text(encoding="utf-8") and
+    'modern_font=%u' in (r/"src/main.cpp").read_text(encoding="utf-8"),
  "Midnight has no wallpaper framebuffer":
     "vector-only atmospheric bands" in ui and
     "static const uint16_t shades[]" in ui,

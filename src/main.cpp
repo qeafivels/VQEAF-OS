@@ -604,9 +604,32 @@ static void diagCommand(const String &cmd) {
     Serial.println("[S3DIAG] SD removal: stop media, unplug, observe event, reinsert, diag sd rw");
 #if defined(VQEAF_PERF_DIAG)
     Serial.println("[S3DIAG] diag qb stage | diag qb verify | diag qb reboot | diag qb cleanup");
+    Serial.println("[S3DIAG] diag qb bench - 64 real TFT overview renders, synthetic input only");
 #endif
     return;
   }
+#if defined(VQEAF_PERF_DIAG)
+  if(c=="diag qb bench"){
+    const ScreenId previous=screen;
+    if(music.playing()||keyboard.active()||
+       (screen!=ScreenId::Launcher&&screen!=ScreenId::Idle)){
+      Serial.println("[QB][HW] result=INCONCLUSIVE reason=UNSAFE_SCREEN_OR_AUDIO");
+      return;
+    }
+    BrowserService isolated;
+    if(!isolated.begin(nullptr)){
+      Serial.println("[QB][HW] result=INCONCLUSIVE reason=PSRAM_UNAVAILABLE");
+      return;
+    }
+    isolated.diagnosticPage(); // No network, SD writes or live cookies.
+    AppContext bench{ui,storage,settings,music,keyboard,notifications,
+                     systemService,wifiProfiles,wifiConnection,isolated,imageViewer,
+                     shellService,themeFiles,appInstaller,appData};
+    browserApp.diagnosticBenchmark(bench);
+    enterScreen(previous,false,true);
+    return;
+  }
+#endif
 #if defined(VQEAF_PERF_DIAG)
   if(c=="diag qb stage" || c=="diag qb verify" || c=="diag qb reboot" || c=="diag qb cleanup") {
     if(music.playing()) {

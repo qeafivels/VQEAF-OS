@@ -80,6 +80,12 @@ class BrowserRecoveryProbe {
     free(tile);return ok;
   }
 public:
+  static bool staged(StorageService &storage) {
+    if(!storage.mounted())return false;
+    storage.recoverAtomicFile(MARKER);
+    uint8_t flag=0;
+    return readExact(storage.fs(),MARKER,&flag,1) && (flag=='F'||flag=='S');
+  }
   static void stage(StorageService &storage) {
     if(!storage.mounted()||!storage.ensureDir(StoragePaths::TEMP)){
       Serial.println("[QB][RECOVERY] stage=INCONCLUSIVE reason=SD_NOT_READY");return;

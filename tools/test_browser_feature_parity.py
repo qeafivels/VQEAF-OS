@@ -20,7 +20,8 @@ gate("if(choice==13){motion.toggleOverview()" in app and
 gate("motion.zoom(e.key==Key::Right?1:-1)" in app and
      "if(v<1) v=1;" in motion and "if(v>8) v=8;" in motion,
      "overview x1-x8 zoom bound")
-gate("motion.scrollPixels(16)" in app and
+gate("motion.scrollPixels(16)" in app and "motion.release()" in app and
+     "now-lastMotionPaint)>=33UL" in app and
      "velocityQ8 = velocityQ8 * 230 / 256" in motion and
      "browserApp.tick(appCtx" in main,
      "fixed-point pixel scroll/inertia OS tick")

@@ -611,9 +611,14 @@ static void diagCommand(const String &cmd) {
 #if defined(VQEAF_PERF_DIAG)
   if(c=="diag qb bench"){
     const ScreenId previous=screen;
+    // Physical CH340 sessions may leave the phone auto-locked. A benchmark
+    // displays only an isolated synthetic page and restores the Lock screen;
+    // it never clears PIN, changes lock state or reads private browser data.
     if(music.playing()||keyboard.active()||
-       (screen!=ScreenId::Launcher&&screen!=ScreenId::Idle)){
-      Serial.println("[QB][HW] result=INCONCLUSIVE reason=UNSAFE_SCREEN_OR_AUDIO");
+       (screen!=ScreenId::Launcher&&screen!=ScreenId::Idle&&
+        screen!=ScreenId::Lock)){
+      Serial.printf("[QB][HW] result=INCONCLUSIVE reason=UNSAFE_SCREEN_OR_AUDIO screen=%u audio=%d keyboard=%d\n",
+        (unsigned)screen,music.playing(),keyboard.active());
       return;
     }
     BrowserService isolated;

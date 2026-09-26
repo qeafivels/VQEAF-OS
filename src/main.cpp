@@ -611,17 +611,22 @@ static void diagCommand(const String &cmd) {
     unsigned installed=0;
     for(int i=0;i<appInstaller.count();++i)
       if(strcmp(appInstaller.at(i).info.type,"lua")==0)++installed;
-    Serial.printf("[VQEAF][LUA][STATUS] enabled=1 psram_free=%lu signed_lua_installed=%u vm_running=%d safe_mode=%d sd=%d\n",
+    Serial.printf("[VQEAF][LUA][STATUS] enabled=1 psram_free=%lu signed_lua_installed=%u vm_running=%d safe_mode=%d sd=%d screen=%u crash_streak=%u boot_healthy=%d key_a_low=%d key_down_low=%d reset=%s\n",
       (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
-      installed,luaVm.running(),systemService.safeMode(),storage.mounted());
+      installed,luaVm.running(),systemService.safeMode(),storage.mounted(),
+      (unsigned)screen,(unsigned)systemService.consecutiveCrashes(),
+      systemService.bootHealthy(),
+      digitalRead(Board::KEY_A)==LOW,digitalRead(Board::KEY_DOWN)==LOW,
+      systemService.lastResetReasonText());
     return;
   }
   if(c=="diag lua probe") {
     // A built-in synthetic VM probe, NOT an unsigned install path. No
     // filesystem, credentials, network, live app or LCD activity.
     if(luaVm.running()||music.playing()||keyboard.active()||
+       systemService.consecutiveCrashes()>=2||
        (screen!=ScreenId::Launcher&&screen!=ScreenId::Idle&&
-        screen!=ScreenId::Lock)){
+        screen!=ScreenId::Lock&&screen!=ScreenId::Recovery)){
       Serial.println("[VQEAF][LUA][PROBE] result=SKIP reason=NOT_IDLE");
       return;
     }

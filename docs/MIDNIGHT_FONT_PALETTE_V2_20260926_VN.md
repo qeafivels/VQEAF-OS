@@ -41,3 +41,12 @@ Các popup và hộp thoại không còn đường viền xám sáng hardcoded �
 - Sau khi chọn Midnight: `diag theme status` phải báo `id=5 modern_font=1`. Theme External (`id=4`) trên thẻ SD được cố ý giữ nguyên; hãy đổi thủ công sang Midnight nếu thiết bị đang sử dụng theme riêng.
 - Đối chiếu Home / Applications / Settings / Theme Manager / dialog trên ST7789 và ghi nhận lỗi ký tự dấu, cắt dòng, ghosting và FPS. Ảnh mockup chỉ để thẩm định thiết kế, không thay thế ảnh chụp LCD.
 
+## Kết quả phần cứng và CI
+
+- Regression Windows `test_midnight_theme.py`, `test_qeapp_icon_list.py`, `test_lua_qeapp_uart.py`: PASS. Build firmware UART Lua ESP32-S3: SUCCESS; RAM tĩnh 91.944 / 327.680 byte (**28,1%**), flash app 1.703.665 / 6.553.600 byte (**26,0%**).
+- GitHub native CI commit `9873e1bd`: **SUCCESS** (các commit trung gian `22661cb` và `2ba875c` từng fail vì biểu thức chính quy Python sai ở bài test mới; đã sửa và chạy lại thành công).
+- Đã sao lưu app1 2MiB và otadata 8KiB trước khi nạp; file riêng tư chỉ giữ tại máy người dùng trong `local_hw_results/`. SHA-256 bản sao app1: `2c023db0e5193f0be04427ab826ba3ae63f12c3d2051e37fcf628f1ebe917655`.
+- Đã nạp firmware `vqeaf_lua_uart` mới vào đúng OTA app1 tại `0x650000` qua COM3; esptool báo `Hash of data verified`. Đọc ngược **1.704.032 byte**, **EXACT_FW_MATCH True**; SHA-256 build/readback `11cd55fc2f4a388d6a43c447b44aa7e009da179afd8b492b8f05d307af94f686`; **OTADATA_UNCHANGED True**. NVS/SD/bootloader không xóa hay format.
+- Trên ESP32-S3 thật sau nạp, `diag lua probe`: **PASS** (`rect=3 text=1 peak_heap=12143`); `diag app icons`: **PASS** (`total=3 expected=2 ok=2 failed=0`).
+- `diag theme status`: **`id=4 name=SD card theme modern_font=0 safe_mode=1`**. Thiết bị đang **cố ý giữ theme tùy chỉnh đã lưu trên SD** và còn Safe Mode, nên chưa thể nghiệm thu font/màu mới *trên LCD vật lý*. `diag lua status` vẫn ghi `reset=Brownout crash_streak=0 boot_healthy=1`. Chỉ sau khi ổn định nguồn và vào Normal Mode mới nên chọn Midnight trong Themes rồi chụp LCD thật và đo FPS. Hình preview chỉ là mô phỏng, không phải ảnh LCD.
+

@@ -1,5 +1,6 @@
 #include "../src/services/BrowserMotion.h"
 #include "../src/services/BrowserCookieJar.h"
+#include "../src/services/BrowserThumbFormat.h"
 #include <cassert>
 #include <cstring>
 #include <cstdio>
@@ -51,4 +52,18 @@ static void cookieTest(){
   char broken[]="C1\nS\tevil.com\t/\tsid\tabc";assert(!loaded.deserialize(broken));
   puts("PASS BrowserCookieJar: persistence, host/path scoping, secure, deletion");
 }
-int main(){motionTest();cookieTest();return 0;}
+
+static void thumbnailFormatTest() {
+  unsigned char rgb[BrowserThumbFormat::WIDTH*BrowserThumbFormat::HEIGHT*2];
+  for(size_t i=0;i<sizeof(rgb);++i)rgb[i]=(unsigned char)(i*43U);
+  const auto header=BrowserThumbFormat::make("https://host.test/img.png",rgb,sizeof(rgb));
+  assert(BrowserThumbFormat::valid(header,"https://host.test/img.png",rgb,sizeof(rgb)));
+  assert(!BrowserThumbFormat::valid(header,"https://other.test/img.png",rgb,sizeof(rgb)));
+  assert(!BrowserThumbFormat::valid(header,"https://host.test/img.png",rgb,sizeof(rgb)-2));
+  rgb[100]^=0x80;
+  assert(!BrowserThumbFormat::valid(header,"https://host.test/img.png",rgb,sizeof(rgb)));
+  assert(header.magic==BrowserThumbFormat::MAGIC);
+  puts("PASS BrowserThumbFormat: origin key, CRC32 corruption, size guards");
+}
+
+int main(){motionTest();cookieTest();thumbnailFormatTest();return 0;}

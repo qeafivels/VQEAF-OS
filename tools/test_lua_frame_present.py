@@ -14,7 +14,7 @@ def check_structure():
     assert 'TFT_eSprite luaCanvas(&tft)' in source, 'Lua must render offscreen'
     assert 'setAttribute(PSRAM_ENABLE' in source, 'Sprite must use PSRAM'
     assert 'luaCanvas.pushSprite(0,29)' in source, 'Flush only content viewport'
-    assert 'luaFramePolicy.needsPresent(' in source, 'Skip unchanged frames'
+    assert 'luaFramePolicy.stripe(' in source, 'Scan dirty rows and skip unchanged frames'
     assert 'luaFramePolicy.invalidate()' in source, 'Repaint after OS Back dialog'
     assert 'draw.user' not in source, 'Do not bypass renderer'
     for pattern in (r'if\s*\(!luaVm\.update\(dt\)\s*\|\|\s*!luaVm\.render\(\)\s*\|\|\s*!luaPresentFrame\(\)\)',

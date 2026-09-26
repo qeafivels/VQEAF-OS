@@ -141,32 +141,41 @@ bool draw(TFT_eSPI &tft, Id id, int16_t x, int16_t y, uint8_t size,
   return decode(a, drawSpan, &dest);
 }
 
-// A scanline compositor is deliberately stack-only: max 36x2 bytes. It
-// streams whole opaque RGB565 rows and batches their SPI transfer, avoiding
-// one display transaction for every compressed pixel span. Background is
-// filled per row: transparent/cropped pixels match draw(clear=true) exactly.
+// Four adjacent RGB565 rows share each TFT window. The fixed 288-byte
+// stack buffer avoids PSRAM/DMA requirements and reduces window setup from
+// 24/36 individual rows to 6/9 transfers for 24/36px icons respectively.
+// Decode remains ordered; blank rows retain the caller's opaque background.
 struct OpaqueScanline {
+  static constexpr uint8_t kRowsPerTransfer = 4;
   TFT_eSPI &tft;
   int16_t x, y;
   uint8_t size;
   uint16_t background;
-  uint16_t pixels[36];
+  uint16_t pixels[36 * kRowsPerTransfer];
   uint8_t nextRow;
+  uint8_t pendingRows;
 
-  void clearRow() {
-    for (uint8_t col = 0; col < size; ++col) pixels[col] = background;
+  void clearCurrentRow() {
+    uint16_t *row = pixels + unsigned(pendingRows) * size;
+    for (uint8_t col = 0; col < size; ++col) row[col] = background;
   }
-  void flush() {
-    tft.pushImage(x, y + nextRow, size, 1, pixels);
+  void submit() {
+    if (!pendingRows) return;
+    tft.pushImage(x, y + nextRow - pendingRows, size, pendingRows, pixels);
+    pendingRows = 0;
+  }
+  void finishRow() {
+    ++pendingRows;
     ++nextRow;
-    clearRow();
+    if (pendingRows == kRowsPerTransfer) submit();
+    if (nextRow < size) clearCurrentRow();
   }
   static void span(void *ptr, uint8_t sx, uint8_t sy, uint8_t n, uint16_t color) {
     auto &self = *static_cast<OpaqueScanline *>(ptr);
-    // Decoder is ordered top-to-bottom, left-to-right. Fill skipped rows too.
-    while (self.nextRow < sy) self.flush();
+    while (self.nextRow < sy) self.finishRow();
     if (self.nextRow != sy || sx + n > self.size) return;
-    for (uint8_t col = 0; col < n; ++col) self.pixels[sx + col] = color;
+    uint16_t *row = self.pixels + unsigned(self.pendingRows) * self.size;
+    for (uint8_t col = 0; col < n; ++col) row[sx + col] = color;
   }
 };
 
@@ -180,8 +189,8 @@ bool drawOpaque(TFT_eSPI &tft, Id id, int16_t x, int16_t y, uint8_t size,
   if (i >= 12 || (size != 24 && size != 36)) return false;
   const auto &asset = size == 24 ? VqeafIconData::ICONS_24[i] : VqeafIconData::ICONS_36[i];
   if (!valid(asset, size)) return false;
-  OpaqueScanline rows = {tft, x, y, size, background, {}, 0};
-  rows.clearRow();
+  OpaqueScanline rows = {tft, x, y, size, background, {}, 0, 0};
+  rows.clearCurrentRow();
   // All drawing in this scope is TFT-only; no SD/WiFi I/O or yielding while
   // the SPI write transaction is open. The board uses one TFT SPI client.
   const bool oldSwap = tft.getSwapBytes();
@@ -190,7 +199,10 @@ bool drawOpaque(TFT_eSPI &tft, Id id, int16_t x, int16_t y, uint8_t size,
   tft.setSwapBytes(true);
   tft.startWrite();
   const bool ok = decode(asset, OpaqueScanline::span, &rows);
-  if (ok) while (rows.nextRow < size) rows.flush();
+  if (ok) {
+    while (rows.nextRow < size) rows.finishRow();
+    rows.submit(); // No partial stripe remains unpainted.
+  }
   tft.endWrite();
   tft.setSwapBytes(oldSwap);
   return ok;

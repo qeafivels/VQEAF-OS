@@ -42,5 +42,32 @@ int main() {
   draw[12*QeLuaFramePolicy::kWidth+3]=0;
   draw[12*QeLuaFramePolicy::kWidth+4]=0xf800;
   if (!ensure(gate.needsPresent(draw.data(),last.data()),"moving sprite changes final image")) return 10;
-  std::puts("PASS 10 Lua frame-policy checks (including 120 unchanged simulated frames)");
+  // SPI crop planner: first present/invalidation must restore full viewport;
+  // local edits must transfer only affected scanlines, no new framebuffer.
+  gate.invalidate();
+  auto s=gate.stripe(draw.data(),last.data());
+  if (!ensure(s.full && s.first==0 && s.rows==270,"invalidated frame is full")) return 11;
+  gate.markPresented();
+  last=draw;
+  s=gate.stripe(draw.data(),last.data());
+  if (!ensure(!s.full && s.rows==0,"unchanged frame has no crop")) return 12;
+  draw[10*QeLuaFramePolicy::kWidth+1]=0x4321;
+  draw[13*QeLuaFramePolicy::kWidth+2]=0x2345;
+  s=gate.stripe(draw.data(),last.data());
+  if (!ensure(!s.full && s.first==10 && s.rows==4,"local edit cropped to four rows")) return 13;
+  last=draw;
+  draw[0]=0xFFFF;
+  draw[269*QeLuaFramePolicy::kWidth]=0xFFFF;
+  s=gate.stripe(draw.data(),last.data());
+  if (!ensure(s.full && s.rows==270,"distant edits require full frame")) return 14;
+  if (!ensure(gate.stripe(nullptr,last.data()).full,"missing buffer cannot crop")) return 15;
+  draw=last;
+  draw[20*QeLuaFramePolicy::kWidth]=0x1111;
+  draw[99*QeLuaFramePolicy::kWidth]=0x1111;
+  s=gate.stripe(draw.data(),last.data());
+  if (!ensure(!s.full && s.first==20 && s.rows==80,"80-row dirty stripe boundary")) return 16;
+  draw[100*QeLuaFramePolicy::kWidth]=0x1111;
+  s=gate.stripe(draw.data(),last.data());
+  if (!ensure(s.full && s.rows==270,"81-row stripe uses full frame")) return 17;
+  std::puts("PASS 17 Lua frame-policy checks (including 120 unchanged simulated frames)");
 }

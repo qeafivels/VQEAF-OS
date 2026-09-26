@@ -28,7 +28,7 @@ bool draw(TFT_eSPI &tft, Id id, int16_t x, int16_t y, uint8_t size,
 // Fast path for a FLAT, fully opaque 24/36px cell. The caller must pass the
 // exact local background; it is written only inside the icon square. Pixel
 // colors and geometry are lossless relative to draw(...,clearBackground=true).
-// A 36-pixel scanline (72 B stack) replaces hundreds of individual SPI spans.
+// Four-row, 288-byte stack stripe batches 24/36px cells into 6/9 transfers.
 // Do not use when transparent art must preserve a non-uniform underlay.
 bool drawOpaque(TFT_eSPI &tft, Id id, int16_t x, int16_t y, uint8_t size,
                 uint16_t background);

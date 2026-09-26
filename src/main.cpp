@@ -6,6 +6,7 @@
 #include <esp_heap_caps.h>
 #include "BoardConfig.h"
 #include "core/BuildSanity.h"
+#include "core/PsramCapacity.h"
 #include "core/Types.h"
 #include "core/InputManager.h"
 #include "core/SymbianUI.h"
@@ -83,6 +84,7 @@ static TFT_eSprite luaCanvas(&tft);
 static uint16_t *luaLastFrame=nullptr;
 static QeLuaFramePolicy luaFramePolicy;
 static uint32_t luaFlushed=0, luaUnchanged=0, luaFlushUs=0, luaStatsAt=0;
+static uint32_t luaPartial=0, luaTransferBytes=0;
 static bool luaPrepareCanvas() {
   if (!psramFound() || heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) <
       2 * QeLuaFramePolicy::kBytes + 65536) return false;
@@ -95,6 +97,7 @@ static bool luaPrepareCanvas() {
   luaCanvas.fillSprite(TFT_BLACK);
   luaFramePolicy.invalidate();
   luaFlushed=luaUnchanged=luaFlushUs=0;
+  luaPartial=luaTransferBytes=0;
   luaStatsAt=millis();
   Serial.printf("[VQEAF][LUA][FRAME] offscreen + snapshot ready, %lu bytes PSRAM\n",
                 (unsigned long)(2 * QeLuaFramePolicy::kBytes));
@@ -109,23 +112,38 @@ static bool luaPresentFrame() {
   if (!luaCanvas.created() || !luaLastFrame) return false;
   const auto *pixels=static_cast<const uint16_t*>(luaCanvas.getPointer());
   if (!pixels) return false;
-  // One LCD transaction at the end of a complete successful callback.
-  // The full-image memcmp also skips redundant clears of an unchanged frame.
-  if (luaFramePolicy.needsPresent(pixels,luaLastFrame)) {
+  // A single dirty-row scan replaces a redundant full-frame memcmp.
+  // Unchanged frames skip the LCD entirely; narrow edits use one SPI stripe.
+  const auto stripe=luaFramePolicy.stripe(pixels,luaLastFrame);
+  if (stripe.rows) {
     const uint32_t started=micros();
-    luaCanvas.pushSprite(0,29); // TFT_eSprite preserves TFT swapBytes state.
+    if (stripe.full) {
+      luaCanvas.pushSprite(0,29); // Complete frame after invalidation or broad changes.
+      memcpy(luaLastFrame,pixels,QeLuaFramePolicy::kBytes);
+      luaTransferBytes+=QeLuaFramePolicy::kBytes;
+    } else {
+      // TFT_eSprite's six-argument overload sends a full-width cropped stripe
+      // in one pushImage transaction; it restores the TFT byte-swap state.
+      if (!luaCanvas.pushSprite(0,29+stripe.first,0,stripe.first,
+                                QeLuaFramePolicy::kWidth,stripe.rows)) return false;
+      const size_t offset=size_t(stripe.first)*QeLuaFramePolicy::kWidth;
+      memcpy(luaLastFrame+offset,pixels+offset,
+             size_t(stripe.rows)*QeLuaFramePolicy::kWidth*sizeof(uint16_t));
+      luaTransferBytes+=uint32_t(stripe.rows)*QeLuaFramePolicy::kWidth*sizeof(uint16_t);
+      ++luaPartial;
+    }
     luaFlushUs+=uint32_t(micros()-started);
-    memcpy(luaLastFrame,pixels,QeLuaFramePolicy::kBytes);
     luaFramePolicy.markPresented();
     ++luaFlushed;
   } else ++luaUnchanged;
   const uint32_t now=millis();
   if (uint32_t(now-luaStatsAt)>=5000) {
-    Serial.printf("[VQEAF][LUA][FRAME] flush=%lu same=%lu avg_spi_us=%lu free_psram=%lu\n",
-      (unsigned long)luaFlushed,(unsigned long)luaUnchanged,
+    Serial.printf("[VQEAF][LUA][FRAME] flush=%lu partial=%lu same=%lu bytes=%lu avg_spi_us=%lu free_psram=%lu\n",
+      (unsigned long)luaFlushed,(unsigned long)luaPartial,(unsigned long)luaUnchanged,
+      (unsigned long)luaTransferBytes,
       (unsigned long)(luaFlushed?luaFlushUs/luaFlushed:0),
       (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-    luaFlushed=luaUnchanged=luaFlushUs=0; luaStatsAt=now;
+    luaFlushed=luaUnchanged=luaFlushUs=luaPartial=luaTransferBytes=0; luaStatsAt=now;
   }
   return true;
 }
@@ -321,8 +339,13 @@ static void enterScreen(ScreenId s, bool animate = true, bool resume = false) {
 #if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
       } else if (!strcmp(meta.type, "lua")) {
         appCtx.pendingPackageLaunch = false;
-        if (systemService.safeMode() || !storage.mounted()) {
-          launchFeedback="Lua unavailable: Safe Mode or no microSD";
+        if (systemService.safeMode()) {
+          launchFeedback="Safe Mode blocks Lua. Recovery: Leave Safe Mode";
+          Serial.println("[VQEAF][QEAPP][LAUNCH_FAIL] reason=SAFE_MODE action=Recovery_Leave_Safe_Mode");
+          s=ScreenId::Applications;
+        } else if (!storage.mounted()) {
+          launchFeedback="microSD unavailable. Reinsert card and rescan Apps";
+          Serial.println("[VQEAF][QEAPP][LAUNCH_FAIL] reason=SD_UNMOUNTED action=Rescan_Apps");
           s=ScreenId::Applications;
         } else {
           // get() just verified the signed installed receipt and all sections.
@@ -482,8 +505,12 @@ static void enterScreen(ScreenId s, bool animate = true, bool resume = false) {
       if (!resume) applicationsApp.enter(appCtx);
       applicationsApp.draw(appCtx);
       if (launchFeedback.length()) {
-        ui.message("Cannot open QEAPP",launchFeedback.substring(0,32),
-                   launchFeedback.substring(32,64),"Rescan or reinstall signed app");
+        const bool blockedBySafeMode=launchFeedback.startsWith("Safe Mode blocks Lua");
+        const bool missingSd=launchFeedback.startsWith("microSD unavailable");
+        ui.message(blockedBySafeMode?"Lua disabled in Safe Mode":"Cannot open QEAPP",
+                   launchFeedback.substring(0,32),launchFeedback.substring(32,64),
+                   blockedBySafeMode?"Recovery > Start normal mode":
+                   missingSd?"Check microSD / rescan Apps":"Inspect signature / rescan Apps");
         ui.softkeys("","","Back");
       }
       break;
@@ -649,6 +676,16 @@ static void diagCommand(const String &cmd) {
     return;
   }
 #endif
+  if(c=="diag clock"){
+    // Live frequency settings, not an oscilloscope/PLL drift measurement.
+    // Repeated host sampling can reveal unexpected CPU clock transitions.
+    Serial.printf("[VQEAF][CLOCK] cpu_mhz=%lu xtal_mhz=%lu apb_mhz=%lu uptime_ms=%lu free_heap=%lu\n",
+      (unsigned long)getCpuFrequencyMhz(),
+      (unsigned long)getXtalFrequencyMhz(),
+      (unsigned long)(getApbFrequency()/1000000UL),
+      (unsigned long)millis(),(unsigned long)ESP.getFreeHeap());
+    return;
+  }
   if(c=="diag keys"){
     // Read-only GPIO sampler. Never synthesizes clicks or steals focus from
     // applications. Press/release a physical button, then query again.
@@ -674,6 +711,23 @@ static void diagCommand(const String &cmd) {
     Serial.printf("[VQEAF][THEME][STATUS] id=%u name=%s modern_font=%u safe_mode=%u\n",
       unsigned(chosen),themeName(chosen),unsigned(chosen==ThemeId::ModernDark),
       unsigned(systemService.safeMode()));
+    return;
+  }
+  if(c=="diag qeapp catalog"){
+    // Read-only snapshot of the already verified installer catalog.
+    unsigned lua=0,web=0,txt=0;
+    Serial.printf("[VQEAF][QEAPP][CATALOG] sd=%d safe_mode=%d verified=%d max=%d\n",
+      storage.mounted(),systemService.safeMode(),appInstaller.count(),AppInstallerService::MAX_INSTALLED);
+    for(int i=0;i<appInstaller.count();++i){
+      const auto &meta=appInstaller.at(i).info;
+      const bool isLua=!strcmp(meta.type,"lua");
+      lua+=isLua;web+=!strcmp(meta.type,"web");txt+=!strcmp(meta.type,"text");
+      Serial.printf("[VQEAF][QEAPP][CATALOG] index=%d type=%s icon=%d launch=%s\n",
+        i,meta.type,meta.hasIcon,
+        (isLua||!strcmp(meta.type,"web"))&&systemService.safeMode()?
+          "BLOCKED_SAFE_MODE":"ELIGIBLE_TO_VERIFY");
+    }
+    Serial.printf("[VQEAF][QEAPP][CATALOG] summary lua=%u web=%u text=%u\n",lua,web,txt);
     return;
   }
   if(c=="diag app icons"){
@@ -702,9 +756,11 @@ static void diagCommand(const String &cmd) {
   if (c == "diag help") {
     Serial.println("[S3DIAG] diag sd status | diag sd rw | diag tls valid|expired|wrong|self|host <domain>");
     Serial.println("[S3DIAG] SD removal: stop media, unplug, observe event, reinsert, diag sd rw");
+    Serial.println("[S3DIAG] diag qeapp catalog - list verified app types and Safe Mode launch eligibility");
     Serial.println("[S3DIAG] diag app icons - verify installed icon files without displaying private app names");
     Serial.println("[S3DIAG] diag theme status - report persisted theme and typography mode");
     Serial.println("[S3DIAG] diag keys - read-only raw 10-button GPIO snapshot, 1=pressed");
+    Serial.println("[S3DIAG] diag clock - live CPU/XTAL/APB frequency settings and uptime");
 #if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
     Serial.println("[S3DIAG] diag lua status | diag lua probe (fixed synthetic VM, no files)");
 #endif
@@ -824,6 +880,7 @@ void setup() {
   Serial.printf("[VQEAF][BUILD] target=ESP32-S3 N16R8 display=240x320 portrait\n");
   const uint32_t flashBytes = ESP.getFlashChipSize();
   const uint32_t psramBytes = ESP.getPsramSize();
+  const bool psramCapacityOk = VqeafMemory::hasN16R8Psram(psramFound(), psramBytes);
   Serial.printf("[VQEAF][MEM] flash=%lu psram=%lu free_heap=%lu\n",
                 (unsigned long)flashBytes, (unsigned long)psramBytes,
                 (unsigned long)ESP.getFreeHeap());
@@ -832,13 +889,16 @@ void setup() {
   // This is not a claim that any particular app has been installed or run.
   Serial.println("[VQEAF][LUA] runtime=ENABLED engine=Lua5.4.8 signed_qeapp2=REQUIRED "
                  "heap_limit=196608 viewport=240x270 frame_cap_hz=20");
-  if (psramBytes < 8UL*1024UL*1024UL)
-    Serial.println("[VQEAF][LUA][WARN] insufficient PSRAM; app launch disabled");
+  if (!psramCapacityOk)
+    Serial.println("[VQEAF][LUA][WARN] N16R8 PSRAM not detected; Lua canvas allocation may fail");
 #endif
   if (flashBytes < 16UL * 1024UL * 1024UL)
     Serial.println("[VQEAF][WARN] flash below N16R8 requirement");
-  if (psramBytes < 8UL * 1024UL * 1024UL)
+  if (!psramCapacityOk)
     Serial.println("[VQEAF][WARN] PSRAM below N16R8 requirement");
+  Serial.printf("[VQEAF][MEM] psram_n16r8=%s psram_largest_free=%lu\n",
+     psramCapacityOk?"PASS":"FAIL",
+     (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
 #endif
   input.begin();
   settings.begin();

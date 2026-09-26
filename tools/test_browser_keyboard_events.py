@@ -20,12 +20,16 @@ assert 'return CardEvent::Removed;' in storage
 assert 'return CardEvent::Mounted;' in storage
 code=r"""
 #include "core/TextKeyboard.h"
+#include "core/SymbianUI.h"
 #include "services/NotificationService.h"
 #include "services/UsbLinkMonitor.h"
 #include <cassert>
 #include <cstdio>
 #include <string>
 uint32_t vqeafFakeMillis=0;
+// Link-only host stubs: keyboard drawing is not invoked by this key-event test.
+void SymbianUI::chrome(const String &,bool,bool,bool,bool){}
+void SymbianUI::softkeys(const String &,const String &,const String &){}
 static KeyEvent k(Key key){return KeyEvent(key,true,false,false);}
 static void send(TextKeyboard &kb,Key key){assert(kb.handle(k(key)));}
 static void up(TextKeyboard &kb,int n){while(n--)send(kb,Key::Up);}

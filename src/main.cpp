@@ -603,17 +603,18 @@ static void diagCommand(const String &cmd) {
     Serial.println("[S3DIAG] diag sd status | diag sd rw | diag tls valid|expired|wrong|self|host <domain>");
     Serial.println("[S3DIAG] SD removal: stop media, unplug, observe event, reinsert, diag sd rw");
 #if defined(VQEAF_PERF_DIAG)
-    Serial.println("[S3DIAG] diag qb stage | diag qb verify | diag qb reboot (isolated fixture only)");
+    Serial.println("[S3DIAG] diag qb stage | diag qb verify | diag qb reboot | diag qb cleanup");
 #endif
     return;
   }
 #if defined(VQEAF_PERF_DIAG)
-  if(c=="diag qb stage" || c=="diag qb verify" || c=="diag qb reboot") {
+  if(c=="diag qb stage" || c=="diag qb verify" || c=="diag qb reboot" || c=="diag qb cleanup") {
     if(music.playing()) {
       Serial.println("[QB][RECOVERY] result=INCONCLUSIVE reason=AUDIO_ACTIVE");return;
     }
     if(c=="diag qb stage")BrowserRecoveryProbe::stage(storage);
     else if(c=="diag qb verify")BrowserRecoveryProbe::verify(storage);
+    else if(c=="diag qb cleanup")BrowserRecoveryProbe::cleanup(storage);
     else {
       if(!BrowserRecoveryProbe::staged(storage)) {
         Serial.println("[QB][RECOVERY] reboot=BLOCKED reason=NO_COMMITTED_STAGE");

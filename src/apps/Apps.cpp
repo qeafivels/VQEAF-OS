@@ -2081,7 +2081,8 @@ bool ThemesApp::apply(AppContext &ctx) {
     feedback = String(themeName(id)) + " applied";
     ctx.notifications.push("Theme applied", themeName(id));
     Serial.printf("[VQEAF][THEME] built-in: %s\n", themeName(id));
-    ctx.ui.clear();
+    // The caller draws the destination exactly once. Clearing the complete
+    // ST7789 here exposes an empty frame on every START/Apply press.
     return true;
   }
   const String path = themePath(ctx, index);
@@ -2099,7 +2100,7 @@ bool ThemesApp::apply(AppContext &ctx) {
   ctx.notifications.push("Theme applied", name);
   feedback = name + " applied";
   Serial.printf("[VQEAF][THEME] applied: %s\n", path.c_str());
-  ctx.ui.clear();
+  // Caller repaints the new palette; no full-screen blackout between themes.
   return true;
 }
 

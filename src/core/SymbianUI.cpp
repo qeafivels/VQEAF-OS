@@ -872,12 +872,11 @@ void SymbianUI::idleClock(bool hour12) {
   tft.setTextSize(2);
   tft.setTextColor(themeId == ThemeId::S60Green ? TFT_BLACK : colors.text, panel);
   if(themeId==ThemeId::ModernDark){
-    // 18px DejaVu bold, custom raster; enlarge the time by a second
-    // baseline stroke instead of changing the stable 78px clock card.
+    // Integer-scaled DejaVu bold (36px), no font-file runtime allocation.
     tft.setTextSize(1);
-    int tw=textWidth(tm,UiTypography::TITLE);
+    int tw=textWidth(tm,UiTypography::TITLE)*2;
     const int x=(Board::SCREEN_W-tw)/2;
-    UiVietnameseFont::draw(tft,x,58,tm.c_str(),colors.text,panel,1,216);
+    UiVietnameseFont::drawScaled(tft,x,53,tm.c_str(),colors.text,panel,1,2,216);
     String dt=dateText();
     int dw=textWidth(dt,UiTypography::MICRO);
     UiVietnameseFont::draw(tft,(Board::SCREEN_W-dw)/2,91,dt.c_str(),colors.dim,panel,0,204);
@@ -987,9 +986,9 @@ void SymbianUI::lockClock(bool hour12, bool dimmed) {
   tft.setTextColor(dimmed ? 0x7BEF : TFT_WHITE, panel);
   if(themeId==ThemeId::ModernDark){
     tft.setTextSize(1);
-    const int tw=textWidth(tm,UiTypography::TITLE);
-    UiVietnameseFont::draw(tft,(Board::SCREEN_W-tw)/2,64,tm.c_str(),
-      dimmed?colors.dim:colors.text,panel,1,190);
+    const int tw=textWidth(tm,UiTypography::TITLE)*2;
+    UiVietnameseFont::drawScaled(tft,(Board::SCREEN_W-tw)/2,58,tm.c_str(),
+      dimmed?colors.dim:colors.text,panel,1,2,190);
     String dt=dateText();
     int dw=textWidth(dt,UiTypography::MICRO);
     UiVietnameseFont::draw(tft,(Board::SCREEN_W-dw)/2,99,dt.c_str(),colors.dim,panel,0,190);
@@ -1019,8 +1018,8 @@ void SymbianUI::clockFace(bool hour12, bool full) {
   tft.setTextColor(colors.text, colors.panel);
   if(themeId==ThemeId::ModernDark){
     tft.setTextSize(1);
-    int tw=textWidth(tm,UiTypography::TITLE);
-    UiVietnameseFont::draw(tft,(Board::SCREEN_W-tw)/2,86,tm.c_str(),colors.text,colors.panel,1,190);
+    int tw=textWidth(tm,UiTypography::TITLE)*2;
+    UiVietnameseFont::drawScaled(tft,(Board::SCREEN_W-tw)/2,79,tm.c_str(),colors.text,colors.panel,1,2,190);
     String dt=dateText();int dw=textWidth(dt,UiTypography::MICRO);
     UiVietnameseFont::draw(tft,(Board::SCREEN_W-dw)/2,126,dt.c_str(),colors.dim,colors.panel,0,190);
   }else{

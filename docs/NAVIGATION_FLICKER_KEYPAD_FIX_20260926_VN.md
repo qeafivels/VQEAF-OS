@@ -30,6 +30,6 @@ Khi cổng COM3 ổn định và người dùng ở cạnh bo:
 1. Mở `python -m serial.tools.miniterm COM3 115200`, nhập `diag keys`. Khi thả hết nút kỳ vọng `pressed_mask=0x000`; khi giữ riêng một nút, kỳ vọng đúng một bit (MENU=001, UP=002, A=004, LEFT=008, START=010, RIGHT=020, OPTION=040, DOWN=080, B=100, SELECT=200). Không gửi lệnh khi miniterm và script đang tranh chấp COM3.
 2. Đóng miniterm rồi chạy `python tools/keypad_uart_lab.py --port COM3`. Tool yêu cầu người dùng giữ lần lượt các phím và báo PASS/FAIL nhấn và thả; không mô phỏng nút nào.
 3. Test bằng mắt Home, Launcher, Themes, Apps Inbox/Installed, Settings, WiFi và popup: D-pad UP/DOWN/LEFT/RIGHT, START, A/B, OPTION, MENU ngắn/dài, SELECT dài. Theo dõi nền sáng/chớp, hình focus, thẻ icon và log panic/brownout. Nếu COM3 mất ngay sau reset, kiểm tra cáp/nguồn/driver CH340 và không kết luận là lỗi UI.
-4. Kiểm tra `diag theme status`: Midnight phải hiện `id=5 modern_font=1`. Theme SD tùy chỉnh `id=4` sẽ giữ nguyên cho tới khi chọn Midnight trực tiếp.
+4. `diag theme status` **đã xác nhận** Midnight `id=5 modern_font=1`; riêng `safe_mode=1` vẫn cần kiểm tra nguồn điện và xử lý Recovery trước khi thử giao diện tương tác. `reset=Brownout` biểu thị lần reset gần nhất, không chứng minh sụt áp đang diễn ra.
 
 Đây là sửa các đường dựng hình được chứng minh ở mã nguồn + kiểm thử tự động + xác minh flash, **không phải báo cáo đã kiểm thử hoàn toàn phím vật lý/FPS màn hình ST7789**.

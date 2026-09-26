@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include <TFT_eSPI.h>
+class StorageService;
 
 // 2 x 64x48 RGB565 PSRAM LRU plus CRC-checked persistent LittleFS tier.
 // Native browser retains ownership of its LCD, WiFi and SD. This component
@@ -8,7 +9,7 @@
 class BrowserThumbnailCache {
 public:
   static constexpr int W=64,H=48;
-  bool begin();
+  bool begin(StorageService *storage);
   ~BrowserThumbnailCache();
   bool ready() const {return initialized;}
   bool has(const char *url);

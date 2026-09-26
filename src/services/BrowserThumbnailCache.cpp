@@ -132,7 +132,8 @@ uint32_t BrowserThumbnailCache::crc32(const uint8_t *data,size_t len) {
   }
   return ~crc;
 }
-bool BrowserThumbnailCache::begin() {
+bool BrowserThumbnailCache::begin(StorageService *storage) {
+  fallbackStorage=storage;
   if(initialized)return true;
   slots[0].pixels=(uint16_t*)heap_caps_malloc(PIXELS*2,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
   slots[1].pixels=(uint16_t*)heap_caps_malloc(PIXELS*2,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
@@ -280,7 +281,4 @@ bool BrowserThumbnailCache::prefetch(const char *url) {
   if(!fetchAndDecode(url,tile->pixels)){++failures;return false;}
   tile->key=hashUrl(url);tile->valid=true;tile->touched=++accessCounter;
   saveFlash(tile->key,*tile);return true;
-}
-void browserThumbnailStorageFallback(StorageService *storage) {
-  fallbackStorage=storage;
 }

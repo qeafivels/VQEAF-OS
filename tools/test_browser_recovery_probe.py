@@ -26,6 +26,6 @@ require('c=="diag qb reboot"' in main and "BrowserRecoveryProbe::staged(storage)
         and "ESP.restart()" in main and "Serial.flush()" in main,
         "reboot only by explicit serial diagnostic after committed test stage")
 require('if(music.playing())' in main and 'diag qb verify' in main and
-        "boot=gather(25" in serial and "port.write(b\"diag qb verify" in serial,
+        "boot=gather(25" in serial and "port_slot[0].write(b\"diag qb verify" in serial,
         "audio guard and post-reboot serial evidence")
 print("PASS isolated recovery probe structural gates")

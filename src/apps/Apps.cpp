@@ -1390,7 +1390,7 @@ ScreenId TextViewerApp::handle(AppContext &ctx,const KeyEvent &e) {
 }
 
 // ---------------- Qeafbrowser ----------------
-static const char *const browserOptions[] = {"Enter address", "Home", "Reload", "Back", "Forward", "Download link", "Downloads", "Page info", "Speed Dial", "History", "Bookmarks", "Bookmark page", "Help"};
+static const char *const browserOptions[] = {"Enter address", "Home", "Reload", "Back", "Forward", "Download link", "Downloads", "Page info", "Speed Dial", "History", "Bookmarks", "Bookmark page", "Help", "Overview"};
 static constexpr int BROWSER_OPTIONS=sizeof(browserOptions)/sizeof(browserOptions[0]);
 static constexpr int BROWSER_VISIBLE=13;
 
@@ -1400,6 +1400,7 @@ void BrowserApp::loadHome(AppContext &ctx) {
   ctx.ui.message("Qeafbrowser","Opening...","Speed Dial"); ctx.ui.softkeys("","","Cancel");
   ctx.browser.load("mtt:start");
   offset=0; selectedLink=ctx.browser.linkCount()?0:-1;
+  resetMotion(ctx);
 }
 
 void BrowserApp::enter(AppContext &ctx) {
@@ -1416,33 +1417,87 @@ void BrowserApp::enter(AppContext &ctx) {
   }
   if(ctx.browser.lineCount()==0) loadHome(ctx);
   if(ctx.browser.linkCount()) selectedLink=0;
+  resetMotion(ctx);
+}
+
+void BrowserApp::resetMotion(AppContext &ctx) {
+  motion.reset(ctx.browser.lineCount());
+  offset=0;
 }
 
 void BrowserApp::redrawBody(AppContext &ctx) {
-  // Do not blank the full viewport on every D-pad scroll. Repaint each row
-  // completely, then the scrollbar; avoid exposing a full black/empty frame.
   TFT_eSPI &d=ctx.ui.display(); ThemeColors c=ctx.ui.c();
   d.fillRect(0,29,240,35,c.bg);
-  d.fillRect(5,36,230,24,c.panel); d.drawRect(5,36,230,24,c.dim);
-  d.setTextFont(1); d.setTextColor(c.dim,c.panel); String u=ctx.browser.url(); if(u.length()>38)u=u.substring(0,37)+"~"; d.setCursor(9,44); d.print(u); if(ctx.browser.pageFromCache()){d.setTextColor(c.accent,c.panel);d.setCursor(201,44);d.print("C");}
-  int y=66;
-  for(int row=0;row<BROWSER_VISIBLE;++row){
-    const int i=offset+row;
-    const bool populated=i<ctx.browser.lineCount();
-    const BrowserLine *ln=populated?&ctx.browser.lineAt(i):nullptr;
-    const bool sel=ln && ln->link>=0 && ln->link==selectedLink;
-    const uint16_t bg=sel?c.selected:c.bg;
-    d.fillRect(0,y-2,240,16,bg);
-    if(ln){
-      d.setTextColor(ln->link>=0?0x05FF:c.text,bg);
-      d.setCursor(7,y);d.print(ln->text);
-      if(sel)d.drawRect(4,y-2,232,15,c.border);
-    }
+  d.fillRect(5,36,230,24,c.panel);d.drawRect(5,36,230,24,c.dim);
+  d.setTextFont(1);d.setTextColor(c.dim,c.panel);
+  String u=ctx.browser.url();if(u.length()>38)u=u.substring(0,37)+"~";
+  d.setCursor(9,44);d.print(u);
+  if(ctx.browser.pageFromCache()){d.setTextColor(c.accent,c.panel);d.setCursor(201,44);d.print("C");}
+  d.fillRect(0,64,240,208,c.bg);
+  // Keep all pixel scrolling within the document viewport.
+  d.setViewport(0,64,240,208,false);
+  int first=motion.firstLine();
+  int y=66-motion.linePixelOffset();
+  for(int row=0;row<14;++row) {
+    int i=first+row;
+    if(i>=ctx.browser.lineCount())break;
+    const BrowserLine &ln=ctx.browser.lineAt(i);
+    bool sel=ln.link>=0 && ln.link==selectedLink;
+    uint16_t bg=sel?c.selected:c.bg;
+    d.fillRect(0,y-2,237,16,bg);
+    d.setTextColor(ln.link>=0?0x05FF:c.text,bg);
+    d.setCursor(7,y);d.print(ln.text);
+    if(sel)d.drawRect(4,y-2,232,15,c.border);
     y+=16;
   }
+  d.resetViewport();
+  offset=first;
   d.fillRect(0,272,240,26,c.bg);
   ctx.ui.scrollbar(ctx.browser.lineCount(),BROWSER_VISIBLE,offset,64,278);
-  ctx.ui.softkeys("Options",selectedLink>=0?"Open":"","Back");
+  ctx.ui.softkeys("Options",selectedLink>=0?"Open":"", "Back");
+}
+
+void BrowserApp::redrawOverview(AppContext &ctx) {
+  TFT_eSPI &d=ctx.ui.display();ThemeColors c=ctx.ui.c();
+  d.fillRect(0,29,240,269,c.bg);
+  d.setTextFont(1);d.setTextColor(c.text,c.bg);
+  d.setCursor(8,37);d.print("Page Overview");
+  d.setCursor(192,37);d.printf("x%d",motion.zoomValue());
+  const int left=12, top=56, width=212, height=210;
+  d.fillRect(left,top,width,height,c.panel);
+  d.drawRect(left,top,width,height,c.dim);
+  // Document preview is built from parsed line geometry without an extra
+  // framebuffer. It is intentionally bounded to visible preview lines.
+  const int scale=motion.zoomValue();
+  const int lineHeight=max(2,8/scale);
+  const int shown=min(ctx.browser.lineCount(),(height-4)/lineHeight);
+  const int first=min(max(0,motion.targetPixel()/16-shown/2),
+                      max(0,ctx.browser.lineCount()-shown));
+  for(int i=0;i<shown;++i){
+    const BrowserLine &line=ctx.browser.lineAt(first+i);
+    int ly=top+3+i*lineHeight;
+    int n=0;while(line.text[n]&&n<50)++n;
+    int w=min(width-16,max(4,n*(scale>=5?1:3)/scale));
+    uint16_t ink=line.link>=0?c.accent:c.dim;
+    d.fillRect(left+5,ly,w,max(1,lineHeight-1),ink);
+  }
+  int cursorY=top+3+(motion.targetPixel()/16-first)*lineHeight;
+  int cursorH=max(8,(208/16)*lineHeight);
+  cursorY=constrain(cursorY,top+2,top+height-10);
+  if(cursorY+cursorH>top+height-2)cursorH=top+height-2-cursorY;
+  d.drawRect(left+2,cursorY,width-4,max(3,cursorH),c.accent);
+  d.fillRect(0,273,240,24,c.bg);
+  d.setTextColor(c.dim,c.bg);d.setCursor(10,280);
+  d.print("UP/DN Pan   LEFT/RIGHT Zoom");
+  ctx.ui.softkeys("Options","Select","Back");
+}
+
+void BrowserApp::tick(AppContext &ctx,bool visible) {
+  if(!visible || ctx.keyboard.active() || popup.open)return;
+  if(motion.tick(millis())) {
+    if(motion.overview())redrawOverview(ctx);
+    else redrawBody(ctx);
+  }
 }
 
 void BrowserApp::draw(AppContext &ctx) {
@@ -1452,16 +1507,18 @@ void BrowserApp::draw(AppContext &ctx) {
   if(!ctx.browser.available()){ctx.ui.message("Qeafbrowser","Browser memory unavailable","Restart or use Recovery");ctx.ui.softkeys("","","Back");return;}
   if(!statusWifi() && ctx.browser.lineCount()==0){ctx.ui.message("Qeafbrowser","WiFi is not connected","Options > Home can open cache");ctx.ui.softkeys("Options","","Back");drawPopup(ctx,popup,browserOptions,BROWSER_OPTIONS);return;}
   if(ctx.browser.lineCount()==0){String err=ctx.browser.error();ctx.ui.message("Qeafbrowser",err.length()?err:"No page loaded","Options > Home or Enter address");ctx.ui.softkeys("Options","","Back");drawPopup(ctx,popup,browserOptions,BROWSER_OPTIONS);return;}
-  redrawBody(ctx); drawPopup(ctx,popup,browserOptions,BROWSER_OPTIONS);
+  if(motion.overview())redrawOverview(ctx);
+  else redrawBody(ctx);
+  drawPopup(ctx,popup,browserOptions,BROWSER_OPTIONS);
 }
 
-void BrowserApp::moveLink(AppContext &ctx,int direction){int n=ctx.browser.linkCount();if(!n){selectedLink=-1;return;}if(selectedLink<0)selectedLink=direction>0?0:n-1;else selectedLink=(selectedLink+n+direction)%n;int first=-1;for(int i=0;i<ctx.browser.lineCount();++i){if(ctx.browser.lineAt(i).link==selectedLink){first=i;break;}}if(first>=0){if(first<offset)offset=first;else if(first>=offset+BROWSER_VISIBLE)offset=first-BROWSER_VISIBLE+1;}redrawBody(ctx);}
+void BrowserApp::moveLink(AppContext &ctx,int direction){int n=ctx.browser.linkCount();if(!n){selectedLink=-1;return;}if(selectedLink<0)selectedLink=direction>0?0:n-1;else selectedLink=(selectedLink+n+direction)%n;int first=-1;for(int i=0;i<ctx.browser.lineCount();++i){if(ctx.browser.lineAt(i).link==selectedLink){first=i;break;}}if(first>=0){if(first<offset)offset=first;else if(first>=offset+BROWSER_VISIBLE)offset=first-BROWSER_VISIBLE+1;motion.jumpToLine(offset);}redrawBody(ctx);}
 
 ScreenId BrowserApp::handle(AppContext &ctx,const KeyEvent &e){
-  if(ctx.keyboard.active()){if(ctx.keyboard.handle(e)){if(ctx.keyboard.accepted()){String u=ctx.keyboard.value();ctx.ui.message("Qeafbrowser","Loading...",u);ctx.browser.load(u);offset=0;selectedLink=ctx.browser.linkCount()?0:-1;}draw(ctx);}return ScreenId::Browser;}
+  if(ctx.keyboard.active()){if(ctx.keyboard.handle(e)){if(ctx.keyboard.accepted()){String u=ctx.keyboard.value();ctx.ui.message("Qeafbrowser","Loading...",u);ctx.browser.load(u);resetMotion(ctx);selectedLink=ctx.browser.linkCount()?0:-1;}draw(ctx);}return ScreenId::Browser;}
   if(!e.pressed||e.longPress)return ScreenId::Browser;
   if(ctx.system.safeMode()){if(e.key==Key::A||e.key==Key::B)return launchedFromPackage?ScreenId::Applications:ScreenId::Launcher;return ScreenId::Browser;}
-  if(popup.open){if(e.key==Key::Start||e.key==Key::Select){int choice=popup.index;popup.close();if(choice==0){String initial=ctx.browser.url();if(initial.startsWith("mtt:"))initial="";ctx.keyboard.open("Web address",initial,false);draw(ctx);return ScreenId::Browser;}if(choice==1){loadHome(ctx);draw(ctx);return ScreenId::Browser;}if(choice==2){ctx.ui.message("Qeafbrowser","Reloading...",ctx.browser.url());ctx.browser.reload();offset=0;selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);return ScreenId::Browser;}if(choice==3){ctx.browser.goBack();offset=0;selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);return ScreenId::Browser;}if(choice==4){ctx.browser.goForward();offset=0;selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);return ScreenId::Browser;}if(choice==5){
+  if(popup.open){if(e.key==Key::Start||e.key==Key::Select){int choice=popup.index;popup.close();if(choice==0){String initial=ctx.browser.url();if(initial.startsWith("mtt:"))initial="";ctx.keyboard.open("Web address",initial,false);draw(ctx);return ScreenId::Browser;}if(choice==1){loadHome(ctx);draw(ctx);return ScreenId::Browser;}if(choice==2){ctx.ui.message("Qeafbrowser","Reloading...",ctx.browser.url());ctx.browser.reload();resetMotion(ctx);selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);return ScreenId::Browser;}if(choice==3){ctx.browser.goBack();resetMotion(ctx);selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);return ScreenId::Browser;}if(choice==4){ctx.browser.goForward();resetMotion(ctx);selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);return ScreenId::Browser;}if(choice==5){
         if(selectedLink<0){ctx.ui.message("Download","Select a page link first");ctx.ui.softkeys("","","Back");return ScreenId::Browser;}
         String saved,err;ctx.ui.message("Qeafbrowser","Downloading...",ctx.browser.linkAt(selectedLink).label);
         if(ctx.browser.download(ctx.browser.linkAt(selectedLink).url,saved,err)){
@@ -1483,7 +1540,7 @@ ScreenId BrowserApp::handle(AppContext &ctx,const KeyEvent &e){
       }if(choice==6){ctx.pendingFolderPath=StoragePaths::DOWNLOADS;return ScreenId::Files;}if(choice==7){ctx.ui.message("Page info",ctx.browser.title(),ctx.browser.url(),String(ctx.browser.pageFromCache()?"CACHE  ":"HTTP ")+String(ctx.browser.status())+"  "+String(ctx.browser.lineCount())+" lines");ctx.ui.softkeys("","","Back");return ScreenId::Browser;}
         if((choice>=8 && choice<=10) || choice==12){
           const char *dest=choice==8?"mtt:start":choice==9?"mtt:history":choice==10?"mtt:bookmark":"mtt:help";
-          ctx.browser.load(dest);offset=0;selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);
+          ctx.browser.load(dest);resetMotion(ctx);selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);
           return ScreenId::Browser;
         }
         if(choice==11){
@@ -1491,11 +1548,19 @@ ScreenId BrowserApp::handle(AppContext &ctx,const KeyEvent &e){
           ctx.notifications.push("Qeafbrowser",saved?"Bookmark saved":"Cannot save bookmark");
           draw(ctx);return ScreenId::Browser;
         }
+        if(choice==13){motion.toggleOverview();draw(ctx);return ScreenId::Browser;}
       }popupNav(popup,e,BROWSER_OPTIONS);draw(ctx);return ScreenId::Browser;}
+  if(motion.overview()){
+    if(e.key==Key::A||e.key==Key::B){motion.toggleOverview();draw(ctx);return ScreenId::Browser;}
+    if(e.key==Key::Up||e.key==Key::Down)motion.overviewPan(e.key==Key::Down?1:-1);
+    if(e.key==Key::Left||e.key==Key::Right)motion.zoom(e.key==Key::Right?1:-1);
+    if(e.key==Key::Start||e.key==Key::Select)motion.toggleOverview();
+    draw(ctx);return ScreenId::Browser;
+  }
   if(e.key==Key::A||e.key==Key::B)return launchedFromPackage?ScreenId::Applications:ScreenId::Launcher;
   if(e.key==Key::Option){popup.show();drawPopup(ctx,popup,browserOptions,BROWSER_OPTIONS);return ScreenId::Browser;}
   if(e.key==Key::Left){moveLink(ctx,-1);return ScreenId::Browser;}if(e.key==Key::Right){moveLink(ctx,1);return ScreenId::Browser;}
-  if(e.key==Key::Up&&offset>0){--offset;redrawBody(ctx);}else if(e.key==Key::Down&&offset+BROWSER_VISIBLE<ctx.browser.lineCount()){++offset;redrawBody(ctx);}else if((e.key==Key::Start||e.key==Key::Select)&&selectedLink>=0){ctx.ui.message("Qeafbrowser","Opening link...",ctx.browser.linkAt(selectedLink).label);ctx.browser.openLink(selectedLink);offset=0;selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);}return ScreenId::Browser;
+  if(e.key==Key::Up&&motion.targetPixel()>0){motion.scrollPixels(-16);redrawBody(ctx);}else if(e.key==Key::Down&&motion.targetPixel()<motion.maxScroll()){motion.scrollPixels(16);redrawBody(ctx);}else if((e.key==Key::Start||e.key==Key::Select)&&selectedLink>=0){ctx.ui.message("Qeafbrowser","Opening link...",ctx.browser.linkAt(selectedLink).label);ctx.browser.openLink(selectedLink);resetMotion(ctx);selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);}return ScreenId::Browser;
 }
 
 // ---------------- S3 diagnostic shell ----------------

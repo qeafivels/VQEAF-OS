@@ -2256,6 +2256,12 @@ static int installerOptionCount(bool installedTab) {
 
 void AppInstallerApp::reload(AppContext &ctx, bool forceCatalogRefresh) {
   count=0;index=0;offset=0;details=false;confirm=false;feedback="";selectedPath="";previewIconReady=false;willUpdate=false;installAllowed=false;confirmData=false;installedMatch=false;previousVersion="";
+  // Package filenames and on-disk bytes can change across scans or SD
+  // reinsertion. Never render an icon verified by a previous scan.
+  for(int slot=0;slot<SymbianUI::LIST_VISIBLE;++slot){
+    iconCacheIndex[slot]=-1;iconCacheState[slot]=0;
+  }
+  lastIconCheckAt=0;
   if (!ctx.storage.mounted()) {feedback="microSD not mounted";return;}
   if (!ctx.storage.ensureSystemLayout()) {
     feedback="SD folders unavailable or read-only";
@@ -2297,6 +2303,12 @@ void AppInstallerApp::reload(AppContext &ctx, bool forceCatalogRefresh) {
 }
 
 void AppInstallerApp::enter(AppContext &ctx,ScreenId from){
+  // This cache contains only VERIFIED icon pixels for the currently visible
+  // Inbox window; use PSRAM to protect the ~8 KiB Arduino loopTask stack.
+  if(!inboxIcons && psramFound())
+    inboxIcons=static_cast<uint16_t*>(heap_caps_malloc(
+        SymbianUI::LIST_VISIBLE*Qeapp::ICON_BYTES,
+        MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
   returnTo=(from==ScreenId::Files||from==ScreenId::Browser)?from:ScreenId::Applications;
   installedTab=false;popup.close();operationResultOpen=false;resultCanOpen=false;resultAppId[0]=0;
   const String requested=ctx.pendingPackagePath;
@@ -2327,10 +2339,18 @@ void AppInstallerApp::paintRow(AppContext &ctx,int item,bool selected){
    if(custom)QeappIconBlit::draw(ctx.ui.display(),9,SymbianUI::CONTENT_TOP+1+row*SymbianUI::LIST_ROW_H+4,gQeappUiIconPixels);
  }else{
    if(item>=count){ctx.ui.clearListRow(row);return;}
+   // Every visible row owns one temporary icon slot, keyed by Inbox index.
+   // Until cryptographic verification completes, use a standard safe glyph.
+   if(iconCacheIndex[row]!=item){iconCacheIndex[row]=item;iconCacheState[row]=0;}
+   const bool custom=inboxIcons && iconCacheState[row]==1;
    if(inboxLabel[item].manifestOk)
      ctx.ui.listItem(row,"App",inboxLabel[item].name,
-       String("v")+inboxLabel[item].version+" / "+inboxLabel[item].type,selected);
-   else ctx.ui.listItem(row,"File",inbox[item].name,"Select to verify signature",selected);
+       String("v")+inboxLabel[item].version+" / "+inboxLabel[item].type,selected,!custom);
+   else ctx.ui.listItem(row,"File",inbox[item].name,"Verifying preview...",selected);
+   if(custom)
+     QeappIconBlit::draw(ctx.ui.display(),9,
+       SymbianUI::CONTENT_TOP+1+row*SymbianUI::LIST_ROW_H+4,
+       inboxIcons+row*1024);
  }
 }
 
@@ -2366,6 +2386,42 @@ void AppInstallerApp::openDetails(AppContext &ctx){
  }
  if (verified && installedTab)
    previewIconReady=ctx.installer.loadIcon(selectedMeta.id,gQeappUiIconPixels);
+}
+
+void AppInstallerApp::tick(AppContext &ctx,bool visible){
+  if(!visible||installedTab||details||confirm||operationResultOpen||popup.open||
+     !ctx.storage.mounted()||!inboxIcons||!count)return;
+  // Bound signature work to ONE visible package per iteration and avoid
+  // repeating it on every keystroke/redraw. Never display an unsigned icon.
+  const uint32_t now=millis();
+  if(lastIconCheckAt && uint32_t(now-lastIconCheckAt)<100)return;
+  for(int row=0;row<SymbianUI::LIST_VISIBLE;++row){
+    const int item=offset+row;
+    if(item>=count)break;
+    if(iconCacheIndex[row]!=item){iconCacheIndex[row]=item;iconCacheState[row]=0;}
+    if(iconCacheState[row])continue;
+    lastIconCheckAt=now;
+    Qeapp::Meta verifiedMeta;String error;bool iconReady=false;
+    const bool verifiedPackage=ctx.installer.inspectWithIcon(
+      inbox[item].path,verifiedMeta,error,gQeappUiIconPixels,iconReady);
+    if(verifiedPackage){
+      InboxLabel &label=inboxLabel[item];
+      snprintf(label.name,sizeof label.name,"%s",verifiedMeta.name);
+      snprintf(label.version,sizeof label.version,"%s",verifiedMeta.version);
+      snprintf(label.type,sizeof label.type,"%s",verifiedMeta.type);
+      label.manifestOk=true;
+    }
+    if(verifiedPackage && iconReady){
+      memcpy(inboxIcons+row*1024,gQeappUiIconPixels,Qeapp::ICON_BYTES);
+      iconCacheState[row]=1;
+    }else{
+      iconCacheState[row]=2;
+      if(!verifiedPackage)
+        Serial.printf("[VQEAF][QEAPP][ICON] inbox_index=%d status=UNVERIFIED\n",item);
+    }
+    paintRow(ctx,item,item==index);
+    return;
+  }
 }
 
 void AppInstallerApp::draw(AppContext &ctx){

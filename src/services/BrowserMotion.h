@@ -59,7 +59,7 @@ public:
   int maxScroll() const {return maxPx();}
   void overviewPan(int dir) {
     // Pan scales with zoom; do not allocate enlarged page images.
-    scrollPixels(dir * (VIEWPORT * zoomLevel / 4));
+    scrollPixels(dir * (VIEWPORT / (2 * zoomLevel)));
     velocityQ8=0;
   }
   // Draw miniature document at 1/zoomLevel, choose a viewport-sized window.

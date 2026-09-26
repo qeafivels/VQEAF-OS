@@ -66,6 +66,13 @@ static void luaText(void *u,int x,int y,const char *value,uint16_t color) {
   canvas->print(value);
 }
 static uint32_t luaMillis(void*) {return millis();}
+struct LuaDiagCounts {unsigned rect=0,text=0;};
+static void luaDiagRect(void *u,int,int,int,int,uint16_t) {
+  ++static_cast<LuaDiagCounts*>(u)->rect;
+}
+static void luaDiagText(void *u,int,int,const char*,uint16_t) {
+  ++static_cast<LuaDiagCounts*>(u)->text;
+}
 #endif
 
 static TFT_eSPI tft;
@@ -599,9 +606,50 @@ static char diagLine[96] = {0};
 static uint8_t diagUsed = 0;
 static void diagCommand(const String &cmd) {
   String c = cmd; c.trim();
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+  if(c=="diag lua status") {
+    unsigned installed=0;
+    for(int i=0;i<appInstaller.count();++i)
+      if(strcmp(appInstaller.at(i).info.type,"lua")==0)++installed;
+    Serial.printf("[VQEAF][LUA][STATUS] enabled=1 psram_free=%lu signed_lua_installed=%u vm_running=%d safe_mode=%d sd=%d\n",
+      (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+      installed,luaVm.running(),systemService.safeMode(),storage.mounted());
+    return;
+  }
+  if(c=="diag lua probe") {
+    // A built-in synthetic VM probe, NOT an unsigned install path. No
+    // filesystem, credentials, network, live app or LCD activity.
+    if(luaVm.running()||music.playing()||keyboard.active()||
+       (screen!=ScreenId::Launcher&&screen!=ScreenId::Idle&&
+        screen!=ScreenId::Lock)){
+      Serial.println("[VQEAF][LUA][PROBE] result=SKIP reason=NOT_IDLE");
+      return;
+    }
+    LuaDiagCounts counts;
+    QeLuaRuntime::Draw callbacks={luaDiagRect,luaDiagText,luaMillis,&counts};
+    static const char fixture[]=
+      "function on_update(dt) if dt<0 then error('dt') end end\\n"
+      "function on_draw() engine.clear(0); engine.rect(1,2,3,4,65535);"
+      " engine.text(5,6,'Lua OK',65535) end\\n"
+      "function on_key(k,down) if down and k=='up' then"
+      " engine.rect(2,3,4,5,31) end end\\n";
+    const bool launched=luaVm.start(fixture,sizeof(fixture)-1,callbacks,64*1024);
+    const bool ok=launched&&luaVm.update(0.05f)&&luaVm.render()&&
+                  luaVm.key("up",true)&&counts.rect>=3&&counts.text==1;
+    const size_t peak=luaVm.peakHeapUsed();
+    Serial.printf("[VQEAF][LUA][PROBE] result=%s rect=%u text=%u peak_heap=%lu error=%s\n",
+      ok?"PASS":"FAIL",counts.rect,counts.text,(unsigned long)peak,
+      ok?"none":luaVm.error());
+    luaVm.stop();
+    return;
+  }
+#endif
   if (c == "diag help") {
     Serial.println("[S3DIAG] diag sd status | diag sd rw | diag tls valid|expired|wrong|self|host <domain>");
     Serial.println("[S3DIAG] SD removal: stop media, unplug, observe event, reinsert, diag sd rw");
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+    Serial.println("[S3DIAG] diag lua status | diag lua probe (fixed synthetic VM, no files)");
+#endif
 #if defined(VQEAF_PERF_DIAG)
     Serial.println("[S3DIAG] diag qb stage | diag qb verify | diag qb reboot | diag qb cleanup");
     Serial.println("[S3DIAG] diag qb bench - 64 real TFT overview renders, synthetic input only");

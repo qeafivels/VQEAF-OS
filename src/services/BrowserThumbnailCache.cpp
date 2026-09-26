@@ -229,7 +229,8 @@ bool BrowserThumbnailCache::fetchAndDecode(const char *url,uint16_t *pixels) {
     String mime=http.header("Content-Type");mime.toLowerCase();
     if(!mime.startsWith("image/jpeg")&&!mime.startsWith("image/png")){http.end();break;}
     const int expected=http.getSize();
-    const String transfer=http.header("Transfer-Encoding");
+    String transfer=http.header("Transfer-Encoding");
+    transfer.toLowerCase();
     const bool chunked=transfer.indexOf("chunked")>=0;
     if(expected>(int)IMAGE_LIMIT || (expected<=0&&!chunked)){http.end();break;}
     WiFiClient *stream=http.getStreamPtr();

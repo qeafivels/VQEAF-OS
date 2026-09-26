@@ -1,7 +1,9 @@
 #include "Arduino.h"
 #include "WiFi.h"
 #include "SD_MMC.h"
+#include "LittleFS.h"
 SerialClass Serial;
 ESPClass ESP;
 WiFiClass WiFi;
 SDMMCFS SD_MMC;
+LittleFSClass LittleFS;

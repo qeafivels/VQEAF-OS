@@ -10,7 +10,9 @@
 
 constexpr int BrowserService::MAX_LINES;
 constexpr int BrowserService::MAX_LINKS;
+constexpr int BrowserService::MAX_IMAGES;
 constexpr int BrowserService::HISTORY_MAX;
+constexpr int BrowserService::FORWARD_MAX;
 
 static void trimAscii(char *s) {
   if (!s) return;
@@ -186,9 +188,13 @@ BrowserService::~BrowserService() {
   // on ESP32. No render work should access these pools after destruction.
   if (lines) free(lines);
   if (links) free(links);
+  if (images) free(images);
   if (history) free(history);
+  if (forward) free(forward);
   if (bookmarks) free(bookmarks);
-  lines = nullptr; links = nullptr; history = nullptr; bookmarks = nullptr;
+  if (cookieJar) { cookieJar->~BrowserCookieJar(); free(cookieJar); }
+  cookieJar=nullptr;
+  lines = nullptr; links = nullptr; images = nullptr; history = nullptr; forward = nullptr; bookmarks = nullptr;
   poolsReady = false;
 }
 
@@ -197,46 +203,77 @@ bool BrowserService::begin(StorageService *storageRef) {
   if (!poolsReady) {
     lines = (BrowserLine*)heap_caps_malloc(sizeof(BrowserLine) * MAX_LINES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     links = (BrowserLink*)heap_caps_malloc(sizeof(BrowserLink) * MAX_LINKS, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    images = (BrowserImage*)heap_caps_malloc(sizeof(BrowserImage) * MAX_IMAGES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     history = (char (*)[192])heap_caps_malloc(sizeof(char[192]) * HISTORY_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    forward = (char (*)[192])heap_caps_malloc(sizeof(char[192]) * FORWARD_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     bookmarks = (char (*)[192])heap_caps_malloc(sizeof(char[192]) * BOOKMARK_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    void *cookieMemory=heap_caps_malloc(sizeof(BrowserCookieJar),MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if(cookieMemory)cookieJar=new(cookieMemory) BrowserCookieJar();
     // Fallback keeps the browser usable on boards where PSRAM init failed, but
     // Safe Mode can still be used if internal memory becomes constrained.
     if (!lines) lines = (BrowserLine*)malloc(sizeof(BrowserLine) * MAX_LINES);
     if (!links) links = (BrowserLink*)malloc(sizeof(BrowserLink) * MAX_LINKS);
+    if (!images) images = (BrowserImage*)malloc(sizeof(BrowserImage) * MAX_IMAGES);
     if (!history) history = (char (*)[192])malloc(sizeof(char[192]) * HISTORY_MAX);
+    if (!forward) forward = (char (*)[192])malloc(sizeof(char[192]) * FORWARD_MAX);
     if (!bookmarks) bookmarks = (char (*)[192])malloc(sizeof(char[192]) * BOOKMARK_MAX);
-    if (!lines || !links || !history || !bookmarks) {
+    if (!cookieJar) { void *p=malloc(sizeof(BrowserCookieJar)); if(p)cookieJar=new(p) BrowserCookieJar(); }
+    if (!lines || !links || !images || !history || !forward || !bookmarks || !cookieJar) {
       if (lines) free(lines);
       if (links) free(links);
+      if (images) free(images);
       if (history) free(history);
+  if (forward) free(forward);
       if (bookmarks) free(bookmarks);
-      lines = nullptr; links = nullptr; history = nullptr; bookmarks = nullptr; poolsReady = false;
+      if(cookieJar){cookieJar->~BrowserCookieJar();free(cookieJar);cookieJar=nullptr;}
+      lines = nullptr; links = nullptr; images = nullptr; history = nullptr; forward = nullptr; bookmarks = nullptr; poolsReady = false;
       snprintf(errorText, sizeof(errorText), "Browser memory unavailable");
       return false;
     }
     for (int i = 0; i < MAX_LINES; ++i) new (&lines[i]) BrowserLine();
     for (int i = 0; i < MAX_LINKS; ++i) new (&links[i]) BrowserLink();
+    for (int i = 0; i < MAX_IMAGES; ++i) new (&images[i]) BrowserImage();
     memset(history, 0, sizeof(char[192]) * HISTORY_MAX);
+    memset(forward, 0, sizeof(char[192]) * FORWARD_MAX);
     memset(bookmarks, 0, sizeof(char[192]) * BOOKMARK_MAX);
     poolsReady = true;
   }
   resetPage();
   cachedPage = false;
-  historyUsed = 0; requestedUrl[0] = 0; retryPending = false;
+  historyUsed = 0; forwardUsed = 0; requestedUrl[0] = 0; retryPending = false;
   loadBookmarks();
+  loadCookies();
   snprintf(currentUrl, sizeof(currentUrl), "%s", "https://qeafivels.com/");
   return true;
 }
 
+#if defined(VQEAF_PERF_DIAG)
+void BrowserService::diagnosticPage() {
+  if(!poolsReady)return;
+  resetPage();
+  snprintf(currentUrl,sizeof(currentUrl),"%s","mtt:diag");
+  snprintf(requestedUrl,sizeof(requestedUrl),"%s",currentUrl);
+  snprintf(pageTitle,sizeof(pageTitle),"%s","Isolated LCD benchmark");
+  retryPending=false;httpStatus=200;
+  for(int i=0;i<72;++i){
+    char line[58]={};
+    snprintf(line,sizeof(line),"Preview tile %02d  VQEAF render stress 1234",i);
+    addWrappedText(line);
+  }
+}
+#endif
+
 void BrowserService::resetPage() {
   lineUsed = 0;
   linkUsed = 0;
+  imageUsed = 0;
   httpStatus = 0;
   pageTitle[0] = 0;
   errorText[0] = 0;
   cachedPage = false;
   if (lines) for (int i = 0; i < MAX_LINES; ++i) { lines[i].text[0] = 0; lines[i].link = -1; }
   if (links) for (int i = 0; i < MAX_LINKS; ++i) { links[i].url[0] = 0; links[i].label[0] = 0; }
+  if (images) for(int i=0;i<MAX_IMAGES;++i){images[i].url[0]=0;images[i].alt[0]=0;images[i].line=-1;}
 }
 
 
@@ -451,6 +488,31 @@ bool BrowserService::download(const String &inputUrl, String &savedPath, String 
 
 // Qeafbrowser internal pages share the existing VQEAF LCD, WiFi, SD and keys.
 static const char *const kBrowserBookmarksPath="/System/Apps/Data/qeafbrowser_bookmarks.txt";
+static const char *const kBrowserCookiesPath="/System/Apps/Data/qeafbrowser_cookies.txt";
+void BrowserService::loadCookies() {
+  if(!cookieJar)return;
+  cookieJar->clear();
+  if(!storage||!storage->mounted())return;
+  storage->recoverAtomicFile(kBrowserCookiesPath);
+  File f=storage->fs().open(kBrowserCookiesPath,FILE_READ);
+  if(!f||f.isDirectory()){if(f)f.close();return;}
+  const size_t length=(size_t)f.size();
+  if(!length||length>4095){f.close();return;}
+  char *buf=(char*)heap_caps_malloc(4096,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  if(!buf){f.close();return;}
+  const size_t read=f.readBytes(buf,length);f.close();
+  if(read==length){buf[read]=0;if(!cookieJar->deserialize(buf))cookieJar->clear();}
+  free(buf);
+}
+bool BrowserService::saveCookies() {
+  if(!cookieJar||!storage||!storage->mounted())return false;
+  char *buf=(char*)heap_caps_malloc(4096,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  if(!buf)return false;
+  const size_t len=cookieJar->serialize(buf,4096);
+  const bool ok=len>0&&storage->writeAtomic(kBrowserCookiesPath,(const uint8_t*)buf,len);
+  free(buf);return ok;
+}
+
 void BrowserService::loadBookmarks() {
   bookmarkUsed=0;
   if(!bookmarks || !storage || !storage->mounted()) return;
@@ -549,6 +611,8 @@ bool BrowserService::renderInternal(const char *url,bool addHistory) {
 void BrowserService::pushHistory(const char *url) {
   if (!history || !url || !url[0]) return;
   if (historyUsed && !strcmp(history[0], url)) return;
+  // Invalidate Forward only after a new navigation successfully loads.
+  forwardUsed = 0;
   int last = min(historyUsed, HISTORY_MAX - 1);
   for (int i = last; i > 0; --i) memmove(history[i], history[i - 1], sizeof(history[0]));
   snprintf(history[0], sizeof(history[0]), "%s", url);
@@ -573,12 +637,39 @@ bool BrowserService::reload() {
 }
 
 bool BrowserService::goBack() {
-  if (historyUsed < 2) return false;
-  char target[192]; snprintf(target, sizeof(target), "%s", history[1]);
-  // Leave history untouched on transport/TLS errors. The user can retry.
+  if (!history || !forward || historyUsed < 2) return false;
+  char target[192], previous[192];
+  snprintf(target, sizeof(target), "%s", history[1]);
+  snprintf(previous, sizeof(previous), "%s", history[0]);
+  // Navigation stack changes are transactional even if HTTP/TLS fails.
   if (!fetchAndParse(target, false)) return false;
-  for (int i = 1; i < historyUsed - 1; ++i) memmove(history[i], history[i + 1], sizeof(history[0]));
+  for (int i = 0; i < historyUsed - 1; ++i)
+    memmove(history[i], history[i + 1], sizeof(history[0]));
   --historyUsed;
+  const int last = min(forwardUsed, FORWARD_MAX - 1);
+  for (int i = last; i > 0; --i)
+    memmove(forward[i], forward[i - 1], sizeof(forward[0]));
+  snprintf(forward[0], sizeof(forward[0]), "%s", previous);
+  if (forwardUsed < FORWARD_MAX) ++forwardUsed;
+  return true;
+}
+
+bool BrowserService::goForward() {
+  if (!history || !forward || forwardUsed < 1) return false;
+  char target[192];
+  snprintf(target, sizeof(target), "%s", forward[0]);
+  if (!fetchAndParse(target, false)) return false;
+  // pushHistory would discard the rest of the Forward stack.
+  if (!historyUsed || strcmp(history[0], currentUrl)) {
+    const int last = min(historyUsed, HISTORY_MAX - 1);
+    for (int i = last; i > 0; --i)
+      memmove(history[i], history[i - 1], sizeof(history[0]));
+    snprintf(history[0], sizeof(history[0]), "%s", currentUrl);
+    if (historyUsed < HISTORY_MAX) ++historyUsed;
+  }
+  for (int i = 0; i < forwardUsed - 1; ++i)
+    memmove(forward[i], forward[i + 1], sizeof(forward[0]));
+  --forwardUsed;
   return true;
 }
 
@@ -647,8 +738,8 @@ bool BrowserService::fetchAndParse(const char *url, bool addHistory) {
     http.setConnectTimeout(9000);
     http.setTimeout(15000);
     http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
-    const char *wantedHeaders[] = {"Content-Type", "Transfer-Encoding"};
-    http.collectHeaders(wantedHeaders, 2);
+    const char *wantedHeaders[] = {"Content-Type", "Transfer-Encoding", "Set-Cookie"};
+    http.collectHeaders(wantedHeaders, 3);
     http.setUserAgent("Opera/9.80 (J2ME/MIDP; Opera Mini/4.5; U; vi) Qeafbrowser-VQEAF/2.1");
 
     WiFiClient plain;
@@ -672,8 +763,19 @@ bool BrowserService::fetchAndParse(const char *url, bool addHistory) {
     http.addHeader("Accept", "text/html,application/xhtml+xml,application/vnd.wap.xhtml+xml,text/plain;q=0.8,*/*;q=0.2");
     http.addHeader("Accept-Encoding", "identity");
     http.addHeader("Accept-Language", "vi,en;q=0.8");
-
+    // Host-only cookie jar: never send Secure cookies over plaintext or let
+    // a response at a redirect's origin write cookies for another origin.
+    if(cookieJar) {
+      char requestCookies[512]={0};
+      if(cookieJar->requestHeader(requestUrl,requestCookies,sizeof(requestCookies)))
+        http.addHeader("Cookie",requestCookies);
+    }
     httpStatus = http.GET();
+    if(httpStatus>0 && cookieJar) {
+      const String setCookie=http.header("Set-Cookie");
+      if(setCookie.length() && cookieJar->ingest(requestUrl,setCookie.c_str()))
+        saveCookies();
+    }
     if (httpStatus <= 0) {
       snprintf(errorText, sizeof(errorText), "%s", tls ?
                "HTTPS verification or network failed" : "HTTP request failed");
@@ -978,10 +1080,25 @@ void BrowserService::parseHtml(const char *src, size_t len) {
       return;
     }
     if (!closing && !strcmp(name,"img")) {
-      char alt[96];
-      if (htmlAttr(raw, "alt", alt, sizeof(alt)) && alt[0]) {
-        decodeEntities(alt);
-        addWrappedText(alt);
+      char alt[96]={0};
+      char source[192]={0};
+      htmlAttr(raw,"alt",alt,sizeof(alt));
+      htmlAttr(raw,"src",source,sizeof(source));
+      decodeEntities(alt);
+      // Preserve accessible text even when thumbnails cannot be fetched.
+      const int firstLine=lineUsed;
+      addWrappedText(alt[0]?alt:"[Image]");
+      if(images && imageUsed<MAX_IMAGES && source[0] && currentUrl[0] &&
+         strncmp(currentUrl,"mtt:",4)) {
+        BrowserImage &ref=images[imageUsed];
+        char resolved[192]={0};
+        if(resolveUrl(currentUrl,source,resolved,sizeof(resolved)) &&
+           !strncasecmp(resolved,"https://",8)) {
+          snprintf(ref.url,sizeof(ref.url),"%s",resolved);
+          snprintf(ref.alt,sizeof(ref.alt),"%s",alt);
+          ref.line=firstLine;
+          ++imageUsed;
+        }
       }
       return;
     }

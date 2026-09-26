@@ -1390,7 +1390,7 @@ ScreenId TextViewerApp::handle(AppContext &ctx,const KeyEvent &e) {
 }
 
 // ---------------- Qeafbrowser ----------------
-static const char *const browserOptions[] = {"Enter address", "Home", "Reload", "Back", "Download link", "Downloads", "Page info", "Speed Dial", "History", "Bookmarks", "Bookmark page", "Help"};
+static const char *const browserOptions[] = {"Enter address", "Home", "Reload", "Back", "Forward", "Download link", "Downloads", "Page info", "Speed Dial", "History", "Bookmarks", "Bookmark page", "Help", "Overview"};
 static constexpr int BROWSER_OPTIONS=sizeof(browserOptions)/sizeof(browserOptions[0]);
 static constexpr int BROWSER_VISIBLE=13;
 
@@ -1400,6 +1400,7 @@ void BrowserApp::loadHome(AppContext &ctx) {
   ctx.ui.message("Qeafbrowser","Opening...","Speed Dial"); ctx.ui.softkeys("","","Cancel");
   ctx.browser.load("mtt:start");
   offset=0; selectedLink=ctx.browser.linkCount()?0:-1;
+  resetMotion(ctx);
 }
 
 void BrowserApp::enter(AppContext &ctx) {
@@ -1407,42 +1408,207 @@ void BrowserApp::enter(AppContext &ctx) {
   launchedFromPackage = ctx.pendingPackageLaunch;
   ctx.pendingPackageLaunch = false;
   if(ctx.system.safeMode() || !ctx.browser.available()) return;
+  if(!thumbs.ready())thumbs.begin(&ctx.storage);
   if (ctx.pendingBrowserUrl.length()) {
     String url=ctx.pendingBrowserUrl;ctx.pendingBrowserUrl="";
     ctx.ui.message("Opening application", "Qeafbrowser", url);
     ctx.browser.load(url);
+    resetMotion(ctx);
     if(ctx.browser.linkCount())selectedLink=0;
     return;
   }
   if(ctx.browser.lineCount()==0) loadHome(ctx);
   if(ctx.browser.linkCount()) selectedLink=0;
+  resetMotion(ctx);
+}
+
+void BrowserApp::resetMotion(AppContext &ctx) {
+  motion.reset(ctx.browser.lineCount());
+  nextThumb=0;lastThumbAttempt=0;
+  lastMotionPaint=0;lastMetrics=0;motionFrames=0;
+  offset=0;
 }
 
 void BrowserApp::redrawBody(AppContext &ctx) {
-  // Do not blank the full viewport on every D-pad scroll. Repaint each row
-  // completely, then the scrollbar; avoid exposing a full black/empty frame.
   TFT_eSPI &d=ctx.ui.display(); ThemeColors c=ctx.ui.c();
   d.fillRect(0,29,240,35,c.bg);
-  d.fillRect(5,36,230,24,c.panel); d.drawRect(5,36,230,24,c.dim);
-  d.setTextFont(1); d.setTextColor(c.dim,c.panel); String u=ctx.browser.url(); if(u.length()>38)u=u.substring(0,37)+"~"; d.setCursor(9,44); d.print(u); if(ctx.browser.pageFromCache()){d.setTextColor(c.accent,c.panel);d.setCursor(201,44);d.print("C");}
-  int y=66;
-  for(int row=0;row<BROWSER_VISIBLE;++row){
-    const int i=offset+row;
-    const bool populated=i<ctx.browser.lineCount();
-    const BrowserLine *ln=populated?&ctx.browser.lineAt(i):nullptr;
-    const bool sel=ln && ln->link>=0 && ln->link==selectedLink;
-    const uint16_t bg=sel?c.selected:c.bg;
-    d.fillRect(0,y-2,240,16,bg);
-    if(ln){
-      d.setTextColor(ln->link>=0?0x05FF:c.text,bg);
-      d.setCursor(7,y);d.print(ln->text);
-      if(sel)d.drawRect(4,y-2,232,15,c.border);
-    }
+  d.fillRect(5,36,230,24,c.panel);d.drawRect(5,36,230,24,c.dim);
+  d.setTextFont(1);d.setTextColor(c.dim,c.panel);
+  String u=ctx.browser.url();if(u.length()>38)u=u.substring(0,37)+"~";
+  d.setCursor(9,44);d.print(u);
+  if(ctx.browser.pageFromCache()){d.setTextColor(c.accent,c.panel);d.setCursor(201,44);d.print("C");}
+  d.fillRect(0,64,240,208,c.bg);
+  // Keep all pixel scrolling within the document viewport.
+  d.setViewport(0,64,240,208,false);
+  int first=motion.firstLine();
+  int y=66-motion.linePixelOffset();
+  for(int row=0;row<14;++row) {
+    int i=first+row;
+    if(i>=ctx.browser.lineCount())break;
+    const BrowserLine &ln=ctx.browser.lineAt(i);
+    bool sel=ln.link>=0 && ln.link==selectedLink;
+    uint16_t bg=sel?c.selected:c.bg;
+    d.fillRect(0,y-2,237,16,bg);
+    d.setTextColor(ln.link>=0?0x05FF:c.text,bg);
+    d.setCursor(7,y);d.print(ln.text);
+    if(sel)d.drawRect(4,y-2,232,15,c.border);
     y+=16;
   }
+  d.resetViewport();
+  offset=first;
   d.fillRect(0,272,240,26,c.bg);
   ctx.ui.scrollbar(ctx.browser.lineCount(),BROWSER_VISIBLE,offset,64,278);
-  ctx.ui.softkeys("Options",selectedLink>=0?"Open":"","Back");
+  ctx.ui.softkeys("Options",selectedLink>=0?"Open":"", "Back");
+}
+
+void BrowserApp::redrawOverview(AppContext &ctx) {
+  TFT_eSPI &d=ctx.ui.display();ThemeColors c=ctx.ui.c();
+  d.fillRect(0,29,240,269,c.bg);
+  d.setTextFont(1);d.setTextColor(c.text,c.bg);
+  d.setCursor(8,37);d.print("Page Overview");
+  d.setCursor(198,37);d.print(String("x")+motion.zoomValue());
+  const int perTile=max(3,25/motion.zoomValue());
+  const int total=max(1,(ctx.browser.lineCount()+perTile-1)/perTile);
+  const int selected=min(total-1,motion.targetPixel()/16/perTile);
+  const int firstTile=min(max(0,selected-4),max(0,total-9));
+  const int tileW=64,tileH=58;
+  for(int i=0;i<9;++i){
+    const int tileIndex=firstTile+i;
+    const int x=17+(i%3)*69, y=58+(i/3)*64;
+    d.fillRect(x,y,tileW,tileH,c.panel);
+    d.drawRect(x,y,tileW,tileH,c.dim);
+    if(tileIndex>=total)continue;
+    const int first=tileIndex*perTile;
+    const int last=min(ctx.browser.lineCount(),first+perTile);
+    int imageIndex=-1;
+    for(int k=0;k<ctx.browser.imageCount();++k){
+      const int line=ctx.browser.imageAt(k).line;
+      if(line>=first&&line<last){imageIndex=k;break;}
+    }
+    bool thumbnail=false;
+    if(imageIndex>=0){
+      thumbnail=thumbs.draw(d,ctx.browser.imageAt(imageIndex).url,x,y+8);
+    }
+    if(!thumbnail) {
+      const int rows=min(8,last-first);
+      for(int j=0;j<rows;++j){
+        const int line=first+(j*max(1,last-first))/max(1,rows);
+        const BrowserLine &entry=ctx.browser.lineAt(min(last-1,line));
+        int chars=0;while(entry.text[chars]&&chars<50)++chars;
+        const int w=min(54,max(4,chars*2/motion.zoomValue()));
+        d.fillRect(x+5,y+7+j*6,w,3,entry.link>=0?c.accent:c.dim);
+      }
+      if(imageIndex>=0){d.setTextColor(c.accent,c.panel);
+        d.setCursor(x+5,y+48);d.print("IMG");}
+    }
+    if(tileIndex==selected) {
+      // Opera Mini-era overview cursor: blue frame, corner handles,
+      // center crosshair; each tile is a bounded page-preview region.
+      d.drawRect(x-1,y-1,tileW+2,tileH+2,c.accent);
+      d.fillRect(x-1,y-1,5,5,c.accent);
+      d.fillRect(x+tileW-4,y-1,5,5,c.accent);
+      d.fillRect(x-1,y+tileH-4,5,5,c.accent);
+      d.fillRect(x+tileW-4,y+tileH-4,5,5,c.accent);
+      d.drawFastHLine(x+tileW/2-3,y+tileH/2,7,c.accent);
+      d.drawFastVLine(x+tileW/2,y+tileH/2-3,7,c.accent);
+    }
+  }
+  const int track=198;
+  d.drawFastVLine(232,58,track,c.dim);
+  const int progress=motion.maxScroll()?
+    (motion.targetPixel()*(track-18))/motion.maxScroll():0;
+  d.fillRect(230,58+progress,4,18,c.accent);
+  d.fillRect(0,261,240,36,c.bg);
+  d.setTextColor(c.dim,c.bg);d.setCursor(12,268);
+  d.print(String("Tile ")+(selected+1)+"/"+total+"   Zoom x"+motion.zoomValue());
+  d.setCursor(12,283);d.print("UP/DN Pan  LEFT/RIGHT Zoom");
+  ctx.ui.softkeys("Options","Select","Back");
+}
+
+#if defined(VQEAF_PERF_DIAG)
+void BrowserApp::diagnosticBenchmark(AppContext &ctx) {
+  // Actual ST7789 writes from the same native Overview renderer, but keys
+  // are injected in software. This is NOT physical key-to-photon latency.
+  if(!ctx.browser.available()||ctx.browser.lineCount()<40) {
+    Serial.println("[QB][HW] result=INCONCLUSIVE reason=NO_SYNTHETIC_PAGE");
+    return;
+  }
+  constexpr int N=64;
+  uint32_t samples[N]={};
+  uint64_t sum=0;
+  uint32_t largest=0;
+  motion.reset(ctx.browser.lineCount());
+  motion.toggleOverview();
+  ctx.ui.chrome("QB LCD Diagnostic",statusWifi(),false,false,ctx.settings.data().hour12);
+  const uint32_t runStart=micros();
+  for(int i=0;i<N;++i) {
+    if(i&&i%8==0)motion.zoom(1);
+    motion.overviewPan((i%12)<8?1:-1);
+    const uint32_t began=micros();
+    redrawOverview(ctx);
+    const uint32_t elapsed=(uint32_t)(micros()-began);
+    samples[i]=elapsed;
+    sum+=elapsed;
+    if(elapsed>largest)largest=elapsed;
+    yield();
+  }
+  const uint32_t runDuration=(uint32_t)(micros()-runStart);
+  // Selection sort on a 256-byte local array avoids heap/float dependencies.
+  for(int i=0;i<N;++i)
+    for(int j=i+1;j<N;++j)
+      if(samples[j]<samples[i]){
+        const uint32_t t=samples[i];samples[i]=samples[j];samples[j]=t;
+      }
+  const uint32_t p95=samples[(N*95+99)/100-1];
+  const uint32_t mean=(uint32_t)(sum/N);
+  const uint32_t rateX10=runDuration?(uint32_t)((uint64_t)N*10000000ULL/runDuration):0;
+  Serial.printf("[QB][HW] render_samples=%d render_avg_us=%lu render_p95_us=%lu render_max_us=%lu throughput_fps_x10=%lu work=overview_x1_to_x8 input=synthetic fps_cap=30 heap8=%lu psram=%lu\n",
+    N,(unsigned long)mean,(unsigned long)p95,(unsigned long)largest,
+    (unsigned long)rateX10,
+    (unsigned long)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+    (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+  motion.toggleOverview();
+}
+#endif
+
+void BrowserApp::tick(AppContext &ctx,bool visible) {
+  if(!visible || ctx.keyboard.active() || popup.open)return;
+  const uint32_t now=millis();
+  // 30Hz upper bound: continuous full-document LCD writes at 60Hz
+  // could starve keypad dispatch on a 40MHz SPI panel.
+  if((uint32_t)(now-lastMotionPaint)>=33UL) {
+    lastMotionPaint=now;
+    if(motion.tick(now)) {
+      if(motion.overview())redrawOverview(ctx);
+      else redrawBody(ctx);
+      ++motionFrames;
+    }
+  }
+#if defined(VQEAF_PERF_DIAG)
+  if(!lastMetrics)lastMetrics=now;
+  const uint32_t elapsed=now-lastMetrics;
+  if(elapsed>=5000UL) {
+    Serial.printf("[QB][PERF] anim_fps=%lu heap8=%lu psram=%lu thumb_ram=%d thumb_fs=%d thumb_fail=%d\n",
+      (unsigned long)(motionFrames*1000UL/elapsed),
+      (unsigned long)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+      (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+      thumbs.ramHits(),thumbs.flashHits(),thumbs.failedRequests());
+    motionFrames=0;lastMetrics=now;
+  }
+#endif
+  // Fetch at most one verified image per interval, only in Overview, never
+  // on a draw callback. Failed requests are skipped until next page visit.
+  const int count=min(3,ctx.browser.imageCount());
+  if(motion.overview() && thumbs.ready() && statusWifi() &&
+     nextThumb<count && (uint32_t)(now-lastThumbAttempt)>=2000UL) {
+    lastThumbAttempt=now;
+    char url[192];
+    snprintf(url,sizeof(url),"%s",ctx.browser.imageAt(nextThumb++).url);
+    if(!thumbs.has(url)){
+      thumbs.prefetch(url);
+      redrawOverview(ctx);
+    }
+  }
 }
 
 void BrowserApp::draw(AppContext &ctx) {
@@ -1452,16 +1618,19 @@ void BrowserApp::draw(AppContext &ctx) {
   if(!ctx.browser.available()){ctx.ui.message("Qeafbrowser","Browser memory unavailable","Restart or use Recovery");ctx.ui.softkeys("","","Back");return;}
   if(!statusWifi() && ctx.browser.lineCount()==0){ctx.ui.message("Qeafbrowser","WiFi is not connected","Options > Home can open cache");ctx.ui.softkeys("Options","","Back");drawPopup(ctx,popup,browserOptions,BROWSER_OPTIONS);return;}
   if(ctx.browser.lineCount()==0){String err=ctx.browser.error();ctx.ui.message("Qeafbrowser",err.length()?err:"No page loaded","Options > Home or Enter address");ctx.ui.softkeys("Options","","Back");drawPopup(ctx,popup,browserOptions,BROWSER_OPTIONS);return;}
-  redrawBody(ctx); drawPopup(ctx,popup,browserOptions,BROWSER_OPTIONS);
+  if(motion.overview())redrawOverview(ctx);
+  else redrawBody(ctx);
+  drawPopup(ctx,popup,browserOptions,BROWSER_OPTIONS);
 }
 
-void BrowserApp::moveLink(AppContext &ctx,int direction){int n=ctx.browser.linkCount();if(!n){selectedLink=-1;return;}if(selectedLink<0)selectedLink=direction>0?0:n-1;else selectedLink=(selectedLink+n+direction)%n;int first=-1;for(int i=0;i<ctx.browser.lineCount();++i){if(ctx.browser.lineAt(i).link==selectedLink){first=i;break;}}if(first>=0){if(first<offset)offset=first;else if(first>=offset+BROWSER_VISIBLE)offset=first-BROWSER_VISIBLE+1;}redrawBody(ctx);}
+void BrowserApp::moveLink(AppContext &ctx,int direction){int n=ctx.browser.linkCount();if(!n){selectedLink=-1;return;}if(selectedLink<0)selectedLink=direction>0?0:n-1;else selectedLink=(selectedLink+n+direction)%n;int first=-1;for(int i=0;i<ctx.browser.lineCount();++i){if(ctx.browser.lineAt(i).link==selectedLink){first=i;break;}}if(first>=0){if(first<offset)offset=first;else if(first>=offset+BROWSER_VISIBLE)offset=first-BROWSER_VISIBLE+1;motion.jumpToLine(offset);}redrawBody(ctx);}
 
 ScreenId BrowserApp::handle(AppContext &ctx,const KeyEvent &e){
-  if(ctx.keyboard.active()){if(ctx.keyboard.handle(e)){if(ctx.keyboard.accepted()){String u=ctx.keyboard.value();ctx.ui.message("Qeafbrowser","Loading...",u);ctx.browser.load(u);offset=0;selectedLink=ctx.browser.linkCount()?0:-1;}draw(ctx);}return ScreenId::Browser;}
-  if(!e.pressed||e.longPress)return ScreenId::Browser;
+  if(ctx.keyboard.active()){if(ctx.keyboard.handle(e)){if(ctx.keyboard.accepted()){String u=ctx.keyboard.value();ctx.ui.message("Qeafbrowser","Loading...",u);ctx.browser.load(u);resetMotion(ctx);selectedLink=ctx.browser.linkCount()?0:-1;}draw(ctx);}return ScreenId::Browser;}
+  if(!e.pressed){if(e.key==Key::Up||e.key==Key::Down)motion.release();return ScreenId::Browser;}
+  if(e.longPress)return ScreenId::Browser;
   if(ctx.system.safeMode()){if(e.key==Key::A||e.key==Key::B)return launchedFromPackage?ScreenId::Applications:ScreenId::Launcher;return ScreenId::Browser;}
-  if(popup.open){if(e.key==Key::Start||e.key==Key::Select){int choice=popup.index;popup.close();if(choice==0){String initial=ctx.browser.url();if(initial.startsWith("mtt:"))initial="";ctx.keyboard.open("Web address",initial,false);draw(ctx);return ScreenId::Browser;}if(choice==1){loadHome(ctx);draw(ctx);return ScreenId::Browser;}if(choice==2){ctx.ui.message("Qeafbrowser","Reloading...",ctx.browser.url());ctx.browser.reload();offset=0;selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);return ScreenId::Browser;}if(choice==3){ctx.browser.goBack();offset=0;selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);return ScreenId::Browser;}if(choice==4){
+  if(popup.open){if(e.key==Key::Start||e.key==Key::Select){int choice=popup.index;popup.close();if(choice==0){String initial=ctx.browser.url();if(initial.startsWith("mtt:"))initial="";ctx.keyboard.open("Web address",initial,false);draw(ctx);return ScreenId::Browser;}if(choice==1){loadHome(ctx);draw(ctx);return ScreenId::Browser;}if(choice==2){ctx.ui.message("Qeafbrowser","Reloading...",ctx.browser.url());ctx.browser.reload();resetMotion(ctx);selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);return ScreenId::Browser;}if(choice==3){ctx.browser.goBack();resetMotion(ctx);selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);return ScreenId::Browser;}if(choice==4){ctx.browser.goForward();resetMotion(ctx);selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);return ScreenId::Browser;}if(choice==5){
         if(selectedLink<0){ctx.ui.message("Download","Select a page link first");ctx.ui.softkeys("","","Back");return ScreenId::Browser;}
         String saved,err;ctx.ui.message("Qeafbrowser","Downloading...",ctx.browser.linkAt(selectedLink).label);
         if(ctx.browser.download(ctx.browser.linkAt(selectedLink).url,saved,err)){
@@ -1480,22 +1649,30 @@ ScreenId BrowserApp::handle(AppContext &ctx,const KeyEvent &e){
         }
         else ctx.ui.message("Download failed",err,ctx.browser.linkAt(selectedLink).url);
         ctx.ui.softkeys("","","Back");return ScreenId::Browser;
-      }if(choice==5){ctx.pendingFolderPath=StoragePaths::DOWNLOADS;return ScreenId::Files;}if(choice==6){ctx.ui.message("Page info",ctx.browser.title(),ctx.browser.url(),String(ctx.browser.pageFromCache()?"CACHE  ":"HTTP ")+String(ctx.browser.status())+"  "+String(ctx.browser.lineCount())+" lines");ctx.ui.softkeys("","","Back");return ScreenId::Browser;}
-        if(choice>=7 && choice<=9 || choice==11){
-          const char *dest=choice==7?"mtt:start":choice==8?"mtt:history":choice==9?"mtt:bookmark":"mtt:help";
-          ctx.browser.load(dest);offset=0;selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);
+      }if(choice==6){ctx.pendingFolderPath=StoragePaths::DOWNLOADS;return ScreenId::Files;}if(choice==7){ctx.ui.message("Page info",ctx.browser.title(),ctx.browser.url(),String(ctx.browser.pageFromCache()?"CACHE  ":"HTTP ")+String(ctx.browser.status())+"  "+String(ctx.browser.lineCount())+" lines");ctx.ui.softkeys("","","Back");return ScreenId::Browser;}
+        if((choice>=8 && choice<=10) || choice==12){
+          const char *dest=choice==8?"mtt:start":choice==9?"mtt:history":choice==10?"mtt:bookmark":"mtt:help";
+          ctx.browser.load(dest);resetMotion(ctx);selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);
           return ScreenId::Browser;
         }
-        if(choice==10){
+        if(choice==11){
           bool saved=ctx.browser.bookmarkCurrent();
           ctx.notifications.push("Qeafbrowser",saved?"Bookmark saved":"Cannot save bookmark");
           draw(ctx);return ScreenId::Browser;
         }
+        if(choice==13){motion.toggleOverview();draw(ctx);return ScreenId::Browser;}
       }popupNav(popup,e,BROWSER_OPTIONS);draw(ctx);return ScreenId::Browser;}
+  if(motion.overview()){
+    if(e.key==Key::A||e.key==Key::B){motion.toggleOverview();draw(ctx);return ScreenId::Browser;}
+    if(e.key==Key::Up||e.key==Key::Down)motion.overviewPan(e.key==Key::Down?1:-1);
+    if(e.key==Key::Left||e.key==Key::Right)motion.zoom(e.key==Key::Right?1:-1);
+    if(e.key==Key::Start||e.key==Key::Select)motion.toggleOverview();
+    draw(ctx);return ScreenId::Browser;
+  }
   if(e.key==Key::A||e.key==Key::B)return launchedFromPackage?ScreenId::Applications:ScreenId::Launcher;
   if(e.key==Key::Option){popup.show();drawPopup(ctx,popup,browserOptions,BROWSER_OPTIONS);return ScreenId::Browser;}
   if(e.key==Key::Left){moveLink(ctx,-1);return ScreenId::Browser;}if(e.key==Key::Right){moveLink(ctx,1);return ScreenId::Browser;}
-  if(e.key==Key::Up&&offset>0){--offset;redrawBody(ctx);}else if(e.key==Key::Down&&offset+BROWSER_VISIBLE<ctx.browser.lineCount()){++offset;redrawBody(ctx);}else if((e.key==Key::Start||e.key==Key::Select)&&selectedLink>=0){ctx.ui.message("Qeafbrowser","Opening link...",ctx.browser.linkAt(selectedLink).label);ctx.browser.openLink(selectedLink);offset=0;selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);}return ScreenId::Browser;
+  if(e.key==Key::Up&&motion.targetPixel()>0){motion.scrollPixels(-16);redrawBody(ctx);}else if(e.key==Key::Down&&motion.targetPixel()<motion.maxScroll()){motion.scrollPixels(16);redrawBody(ctx);}else if((e.key==Key::Start||e.key==Key::Select)&&selectedLink>=0){ctx.ui.message("Qeafbrowser","Opening link...",ctx.browser.linkAt(selectedLink).label);ctx.browser.openLink(selectedLink);resetMotion(ctx);selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);}return ScreenId::Browser;
 }
 
 // ---------------- S3 diagnostic shell ----------------

@@ -2,11 +2,17 @@ name: VQEAF native Qeafbrowser ESP32-S3
 on:
   workflow_dispatch:
   push:
-    branches: [feat/qeafbrowser-native-v251]
+    branches: [feat/qeafbrowser-native-v251, feat/qeafbrowser-parity-20260926]
     paths:
       - 'src/**'
       - 'platformio.ini'
       - 'tools/test_qeafbrowser_os.py'
+      - 'tools/browser_parity_host.cpp'
+      - 'tools/test_browser_feature_parity.py'
+      - 'tools/test_browser_recovery_probe.py'
+      - 'tools/test_browser_recovery_host.py'
+      - 'tools/browser_recovery_host.cpp'
+      - 'tools/qb_hardware_lab.py'
       - 'tools/test_lua_frame_present.py'
       - 'tools/test_lua_transition_noblank.py'
       - '.github/workflows/qeafbrowser-native-ci.yml'
@@ -25,14 +31,23 @@ jobs:
         run: python -m pip install cryptography pillow platformio
       - name: Test browser routes, bookmark durability and OS integration
         run: python tools/test_qeafbrowser_os.py
+      - name: Host regression - overview, zoom, inertia, cookie isolation, thumbnail CRC
+        run: |
+          g++ -std=c++11 -O2 -Wall -Wextra -Werror tools/browser_parity_host.cpp -o /tmp/qb-parity-host
+          /tmp/qb-parity-host
+          python tools/test_browser_feature_parity.py
+          python tools/test_browser_recovery_probe.py
+          python tools/test_browser_recovery_host.py
       - name: Regression for Back, URL, signature and previous no-blank Lua patch
         run: |
           python tools/test_lua_transition_noblank.py
           python tools/test_lua_frame_present.py
           python tools/test_backguard_v251.py
           python tools/test_v15_signature.py
-      - name: Build stock ESP32-S3 N16R8 firmware
-        run: pio run -e vqeaf_os
+      - name: Build stock and diagnostic ESP32-S3 N16R8 firmware
+        run: |
+          pio run -e vqeaf_os
+          pio run -e vqeaf_perf_diag
       - name: Fetch official verified Lua 5.4.8 and run VM regression
         run: |
           python tools/bootstrap_lua.py --firmware-root .

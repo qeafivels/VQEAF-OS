@@ -1562,7 +1562,7 @@ void BrowserApp::diagnosticBenchmark(AppContext &ctx) {
   const uint32_t p95=samples[(N*95+99)/100-1];
   const uint32_t mean=(uint32_t)(sum/N);
   const uint32_t rateX10=runDuration?(uint32_t)((uint64_t)N*10000000ULL/runDuration):0;
-  Serial.printf("[QB][HW] render_samples=%d render_avg_us=%lu render_p95_us=%lu render_max_us=%lu throughput_fps_x10=%lu work=overview_x1_to_x8 input=synthetic fps_cap=30 heap8=%lu psram=%lu\\n",
+  Serial.printf("[QB][HW] render_samples=%d render_avg_us=%lu render_p95_us=%lu render_max_us=%lu throughput_fps_x10=%lu work=overview_x1_to_x8 input=synthetic fps_cap=30 heap8=%lu psram=%lu\n",
     N,(unsigned long)mean,(unsigned long)p95,(unsigned long)largest,
     (unsigned long)rateX10,
     (unsigned long)heap_caps_get_free_size(MALLOC_CAP_8BIT),
@@ -1588,7 +1588,7 @@ void BrowserApp::tick(AppContext &ctx,bool visible) {
   if(!lastMetrics)lastMetrics=now;
   const uint32_t elapsed=now-lastMetrics;
   if(elapsed>=5000UL) {
-    Serial.printf("[QB][PERF] anim_fps=%lu heap8=%lu psram=%lu thumb_ram=%d thumb_fs=%d thumb_fail=%d\\n",
+    Serial.printf("[QB][PERF] anim_fps=%lu heap8=%lu psram=%lu thumb_ram=%d thumb_fs=%d thumb_fail=%d\n",
       (unsigned long)(motionFrames*1000UL/elapsed),
       (unsigned long)heap_caps_get_free_size(MALLOC_CAP_8BIT),
       (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),

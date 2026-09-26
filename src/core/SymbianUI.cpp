@@ -940,9 +940,9 @@ void SymbianUI::idleShortcutDelta(int previous, int next) {
 void SymbianUI::lockScreen(bool wifi, bool ble, bool sd, bool hour12, int unreadNotifications, bool dimmed) {
   drawWallpaper();
   invalidateChrome();
-  const uint16_t panel = dimmed ? 0x0000 : (themeId == ThemeId::S60Green ? 0x4BE5 : 0x1082);
+  const uint16_t panel = dimmed ? 0x0000 : (themeId == ThemeId::S60Green ? 0x4BE5 : (themeId==ThemeId::ModernDark?colors.panel:0x1082));
   tft.fillRect(14, 39, Board::SCREEN_W - 28, 205, panel);
-  tft.drawRect(14, 39, Board::SCREEN_W - 28, 205, dimmed ? 0x4208 : 0xBDF7);
+  tft.drawRect(14,39,Board::SCREEN_W-28,205,dimmed?0x4208:(themeId==ThemeId::ModernDark?colors.border:0xBDF7));
 
   lockClock(hour12, dimmed);
   drawIcon(106, 146, "Lock", panel);
@@ -950,40 +950,54 @@ void SymbianUI::lockScreen(bool wifi, bool ble, bool sd, bool hour12, int unread
   tft.setTextSize(1);
   tft.setTextColor(dimmed ? 0x7BEF : colors.text, panel);
   const char *label = "Keypad locked";
-  const int lw = tft.textWidth(label);
-  tft.setCursor((Board::SCREEN_W - lw) / 2, 183); tft.print(label);
+  const int lw = textWidth(label,UiTypography::TITLE);
+  if(themeId==ThemeId::ModernDark)
+    UiVietnameseFont::draw(tft,(Board::SCREEN_W-lw)/2,183,label,
+      dimmed?colors.dim:colors.text,panel,1,210);
+  else{tft.setCursor((Board::SCREEN_W-lw)/2,183);tft.print(label);}
   tft.setTextFont(1);
   String n = unreadNotifications ? String(unreadNotifications) + " notification(s)" : "No notifications";
-  int nw = tft.textWidth(n);
-  tft.setCursor((Board::SCREEN_W - nw) / 2, 210); tft.print(n);
+  int nw = textWidth(n,UiTypography::MICRO);
+  if(themeId==ThemeId::ModernDark)
+    UiVietnameseFont::draw(tft,(Board::SCREEN_W-nw)/2,210,n.c_str(),colors.dim,panel,0,210);
+  else{tft.setCursor((Board::SCREEN_W-nw)/2,210);tft.print(n);}
 
   // No SIM/modem on this device: lock status is WiFi + battery only.
   (void)ble; (void)sd;
   if (wifi) drawStatusWifi(98, 231, dimmed ? 0x7BEF : TFT_WHITE);
   drawStatusBattery(126, 230, dimmed ? 0x7BEF : TFT_WHITE);
 
-  const uint16_t lockFooter = themeId == ThemeId::S60Green ? 0x2B63 : 0x1082;
+  const uint16_t lockFooter = themeId == ThemeId::S60Green ? 0x2B63 :
+    (themeId==ThemeId::ModernDark?colors.chrome:0x1082);
   tft.fillRect(0, 260, Board::SCREEN_W, 36, lockFooter);
   tft.setTextColor(themeId == ThemeId::S60Green ? TFT_WHITE : 0xC618, lockFooter);
-  tft.setCursor(42, 273); tft.print("Press START to unlock");
+  if(themeId==ThemeId::ModernDark)
+    UiVietnameseFont::draw(tft,47,272,"Press START to unlock",colors.dim,lockFooter,0,190);
+  else{tft.setCursor(42,273);tft.print("Press START to unlock");}
   softkeys("", "Unlock", "");
 }
 
 
 void SymbianUI::lockClock(bool hour12, bool dimmed) {
-  const uint16_t panel = dimmed ? 0x0000 : (themeId == ThemeId::S60Green ? 0x4BE5 : 0x1082);
+  const uint16_t panel = dimmed ? 0x0000 : (themeId == ThemeId::S60Green ? 0x4BE5 : (themeId==ThemeId::ModernDark?colors.panel:0x1082));
   tft.fillRect(22, 54, Board::SCREEN_W - 44, 78, panel);
   String tm = timeText(hour12);
   tft.setTextFont(2);
   tft.setTextSize(2);
   tft.setTextColor(dimmed ? 0x7BEF : TFT_WHITE, panel);
-  int tw = tft.textWidth(tm);
-  tft.setCursor((Board::SCREEN_W - tw) / 2, 59); tft.print(tm);
-  tft.setTextSize(1);
-  String dt = dateText();
-  tft.setTextFont(2);
-  int dw = tft.textWidth(dt);
-  tft.setCursor((Board::SCREEN_W - dw) / 2, 99); tft.print(dt);
+  if(themeId==ThemeId::ModernDark){
+    tft.setTextSize(1);
+    const int tw=textWidth(tm,UiTypography::TITLE);
+    UiVietnameseFont::draw(tft,(Board::SCREEN_W-tw)/2,64,tm.c_str(),
+      dimmed?colors.dim:colors.text,panel,1,190);
+    String dt=dateText();
+    int dw=textWidth(dt,UiTypography::MICRO);
+    UiVietnameseFont::draw(tft,(Board::SCREEN_W-dw)/2,99,dt.c_str(),colors.dim,panel,0,190);
+  }else{
+    int tw=tft.textWidth(tm);tft.setCursor((Board::SCREEN_W-tw)/2,59);tft.print(tm);
+    tft.setTextSize(1);String dt=dateText();tft.setTextFont(2);
+    int dw=tft.textWidth(dt);tft.setCursor((Board::SCREEN_W-dw)/2,99);tft.print(dt);
+  }
   tft.setTextFont(1);
 }
 
@@ -994,21 +1008,26 @@ void SymbianUI::clockFace(bool hour12, bool full) {
     tft.drawRect(12, 64, Board::SCREEN_W - 24, 113, colors.dim);
     tft.setTextFont(1);
     tft.setTextColor(colors.dim, colors.bg);
-    tft.setCursor(26, 205);
-    tft.print("Network time syncs automatically over WiFi");
+    if(themeId==ThemeId::ModernDark)
+      UiVietnameseFont::draw(tft,26,205,"Time syncs over WiFi",colors.dim,colors.bg,0,188);
+    else{tft.setCursor(26,205);tft.print("Network time syncs automatically over WiFi");}
   }
   tft.fillRect(20, 75, Board::SCREEN_W - 40, 88, colors.panel);
   String tm = timeText(hour12);
   tft.setTextFont(2);
   tft.setTextSize(2);
   tft.setTextColor(colors.text, colors.panel);
-  int tw = tft.textWidth(tm);
-  tft.setCursor((Board::SCREEN_W - tw) / 2, 81); tft.print(tm);
-  tft.setTextSize(1);
-  String dt = dateText();
-  tft.setTextFont(2);
-  int dw = tft.textWidth(dt);
-  tft.setCursor((Board::SCREEN_W - dw) / 2, 126); tft.print(dt);
+  if(themeId==ThemeId::ModernDark){
+    tft.setTextSize(1);
+    int tw=textWidth(tm,UiTypography::TITLE);
+    UiVietnameseFont::draw(tft,(Board::SCREEN_W-tw)/2,86,tm.c_str(),colors.text,colors.panel,1,190);
+    String dt=dateText();int dw=textWidth(dt,UiTypography::MICRO);
+    UiVietnameseFont::draw(tft,(Board::SCREEN_W-dw)/2,126,dt.c_str(),colors.dim,colors.panel,0,190);
+  }else{
+    int tw=tft.textWidth(tm);tft.setCursor((Board::SCREEN_W-tw)/2,81);tft.print(tm);
+    tft.setTextSize(1);String dt=dateText();tft.setTextFont(2);
+    int dw=tft.textWidth(dt);tft.setCursor((Board::SCREEN_W-dw)/2,126);tft.print(dt);
+  }
   tft.setTextFont(1);
 }
 
@@ -1034,8 +1053,17 @@ void SymbianUI::dialog(const String &title, const String &line1, const String &l
   tft.setTextFont(2); tft.setTextColor(colors.chromeText,colors.chrome);
   textBold(x+9,y+7,title,2,colors.chromeText,colors.chrome,true);
   tft.setTextFont(1); tft.setTextColor(colors.popupText,colors.popup);
-  tft.setCursor(x+10,y+43); tft.print(line1);
-  if (line2.length()) { tft.setCursor(x+10,y+60); tft.print(line2); }
+  if(themeId==ThemeId::ModernDark){
+    const String a=fitTextPixels(line1,UiTypography::MICRO,w-20);
+    UiVietnameseFont::draw(tft,x+10,y+43,a.c_str(),colors.popupText,colors.popup,0,w-20);
+    if(line2.length()){
+      const String b=fitTextPixels(line2,UiTypography::MICRO,w-20);
+      UiVietnameseFont::draw(tft,x+10,y+60,b.c_str(),colors.popupText,colors.popup,0,w-20);
+    }
+  }else{
+    tft.setCursor(x+10,y+43);tft.print(line1);
+    if(line2.length()){tft.setCursor(x+10,y+60);tft.print(line2);}
+  }
   const int by=y+h-33, bw=(w-26)/2;
   uint16_t lbg=selected==0?colors.popupSelected:colors.popup;
   uint16_t rbg=selected==1?colors.popupSelected:colors.popup;
@@ -1043,9 +1071,17 @@ void SymbianUI::dialog(const String &title, const String &line1, const String &l
   tft.fillRect(x+18+bw,by,bw,24,rbg); tft.drawRect(x+18+bw,by,bw,24,colors.border);
   tft.setTextFont(1);
   tft.setTextColor(selected==0?(themeId==ThemeId::External?selectedInk:TFT_WHITE):colors.popupText,lbg);
-  int lw=tft.textWidth(left); tft.setCursor(x+8+(bw-lw)/2,by+8); tft.print(left);
+  int lw=textWidth(left,UiTypography::MICRO);
+  if(themeId==ThemeId::ModernDark)
+    UiVietnameseFont::draw(tft,x+8+(bw-lw)/2,by+5,left.c_str(),
+      selected==0?selectedInk:colors.popupText,lbg,0,bw);
+  else{tft.setCursor(x+8+(bw-lw)/2,by+8);tft.print(left);}
   tft.setTextColor(selected==1?(themeId==ThemeId::External?selectedInk:TFT_WHITE):colors.popupText,rbg);
-  int rw=tft.textWidth(right); tft.setCursor(x+18+bw+(bw-rw)/2,by+8); tft.print(right);
+  int rw=textWidth(right,UiTypography::MICRO);
+  if(themeId==ThemeId::ModernDark)
+    UiVietnameseFont::draw(tft,x+18+bw+(bw-rw)/2,by+5,right.c_str(),
+      selected==1?selectedInk:colors.popupText,rbg,0,bw);
+  else{tft.setCursor(x+18+bw+(bw-rw)/2,by+8);tft.print(right);}
 }
 
 void SymbianUI::transitionOut() {
@@ -1067,10 +1103,14 @@ void SymbianUI::openingApp(const String &name, const String &icon, bool resume) 
   drawIcon(cx - ICON_BOX/2, 102, icon, colors.bg);
   tft.setTextFont(2); tft.setTextSize(1); tft.setTextColor(colors.text, colors.bg);
   String action = resume ? "Dang tiep tuc" : "Dang mo ung dung";
-  int aw = tft.textWidth(action); textBold((Board::SCREEN_W-aw)/2, 145, action, 2, colors.text, colors.bg, true);
+  int aw = textWidth(action,UiTypography::TITLE);
+  textBold((Board::SCREEN_W-aw)/2,145,action,2,colors.text,colors.bg,true);
   tft.setTextFont(1); tft.setTextColor(colors.dim, colors.bg);
   String n = name; if (n.length() > 26) n = n.substring(0,25) + "~";
-  int nw=tft.textWidth(n); tft.setCursor((Board::SCREEN_W-nw)/2, 169); tft.print(n);
+  int nw=textWidth(n,UiTypography::MICRO);
+  if(themeId==ThemeId::ModernDark)
+    UiVietnameseFont::draw(tft,(Board::SCREEN_W-nw)/2,169,n.c_str(),colors.dim,colors.bg,0,222);
+  else{tft.setCursor((Board::SCREEN_W-nw)/2,169);tft.print(n);}
   tft.drawRect(54, 198, 132, 7, colors.dim);
   tft.fillRect(56, 200, 92, 3, colors.accent);
   softkeys("", "", "");

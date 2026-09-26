@@ -39,9 +39,11 @@ int SymbianUI::textWidth(const String &text, uint8_t font) {
   const uint8_t oldFont = font;
   tft.setTextFont(oldFont);
   tft.setTextSize(1);
-  return UiVietnameseFont::hasUtf8(text.c_str())
-    ? UiVietnameseFont::measure(text.c_str(), font == UiTypography::MICRO ? 0 : 1)
-    : tft.textWidth(text);
+  // Midnight uses one complete system typeface for BOTH ASCII and Vietnamese;
+  // legacy skins retain the original TFT_eSPI/UTF-8 mixed font for compatibility.
+  if(themeId==ThemeId::ModernDark || UiVietnameseFont::hasUtf8(text.c_str()))
+    return UiVietnameseFont::measure(text.c_str(),font==UiTypography::BODY || font==UiTypography::TITLE ? 1:0);
+  return tft.textWidth(text);
 }
 
 void SymbianUI::textBold(int x, int y, const String &text, uint8_t font,
@@ -49,9 +51,10 @@ void SymbianUI::textBold(int x, int y, const String &text, uint8_t font,
   // Nokia 2700/S40-inspired heavy raster text without loading a custom font.
   // TFT_eSPI Font 2 is used for UI labels and drawn twice one pixel apart.
   // This costs no font RAM/PSRAM and keeps the exact same baseline/metrics.
-  if (UiVietnameseFont::hasUtf8(text.c_str())) {
+  if (themeId==ThemeId::ModernDark || UiVietnameseFont::hasUtf8(text.c_str())) {
+    const uint8_t role=(font==UiTypography::BODY || font==UiTypography::TITLE)?1:0;
     UiVietnameseFont::draw(tft, x, y, text.c_str(), fg, bg,
-                           font == UiTypography::MICRO ? 0 : 1, Board::SCREEN_W - x);
+                           role, Board::SCREEN_W - x);
     return;
   }
   tft.setTextFont(font);
@@ -216,9 +219,10 @@ void SymbianUI::chrome(const String &title, bool wifi, bool ble, bool sd, bool h
     if (tm != chromeClock) {
       tft.fillRect(centerX, 0, STATUS_ZONE_W, TITLEBAR_H - 2, bar);
       tft.setTextColor(ink, bar); tft.setTextFont(1); tft.setTextSize(1);
-      const int tw = tft.textWidth(tm);
-      tft.setCursor((Board::SCREEN_W - tw) / 2, 9);
-      tft.print(tm);
+      const int tw = textWidth(tm,UiTypography::MICRO);
+      if(themeId==ThemeId::ModernDark)
+        UiVietnameseFont::draw(tft,(Board::SCREEN_W-tw)/2,8,tm.c_str(),ink,bar,0,STATUS_ZONE_W);
+      else{tft.setCursor((Board::SCREEN_W-tw)/2,9);tft.print(tm);}
       snprintf(chromeClock, sizeof(chromeClock), "%s", tm.c_str());
     }
     if (wifiBars != chromeWifiBars) {
@@ -235,7 +239,7 @@ void SymbianUI::chrome(const String &title, bool wifi, bool ble, bool sd, bool h
   if (themeId == ThemeId::S60Green) {
     tft.drawFastHLine(0, TITLEBAR_H - 2, Board::SCREEN_W, 0x4BE5);
     tft.drawFastHLine(0, TITLEBAR_H - 1, Board::SCREEN_W, 0xAEE9);
-  } else if (themeId == ThemeId::AmoledRed || themeId == ThemeId::External) {
+  } else if (themeId == ThemeId::AmoledRed || themeId == ThemeId::External || themeId == ThemeId::ModernDark) {
     tft.drawFastHLine(0, TITLEBAR_H - 2, Board::SCREEN_W, colors.border);
     tft.drawFastHLine(0, TITLEBAR_H - 1, Board::SCREEN_W, colors.accent);
   } else {
@@ -245,21 +249,16 @@ void SymbianUI::chrome(const String &title, bool wifi, bool ble, bool sd, bool h
   // Left zone: app title. Trim by rendered width rather than character count so
   // it can never collide with the centered time on the narrow 240px display.
   tft.setTextColor(ink, bar); tft.setTextFont(2); tft.setTextSize(1);
-  String cut = title;
-  const int titleMaxW = STATUS_ZONE_W - 8;
-  while (cut.length() > 1 && tft.textWidth(cut) > titleMaxW) cut.remove(cut.length() - 1);
-  if (cut != title && cut.length() > 1) {
-    cut.remove(cut.length() - 1);
-    cut += "~";
-  }
+  const String cut=fitTextPixels(title,UiTypography::TITLE,STATUS_ZONE_W-8);
   textBold(UiTypography::HEADER_TITLE_X,UiTypography::HEADER_TITLE_Y,cut,
            UiTypography::TITLE,ink,bar,true);
 
   // Center zone: clock is centered against the complete 240px screen.
   tft.setTextFont(1);
-  const int tw = tft.textWidth(tm);
-  tft.setCursor((Board::SCREEN_W - tw) / 2, 9);
-  tft.print(tm);
+  const int tw = textWidth(tm,UiTypography::MICRO);
+  if(themeId==ThemeId::ModernDark)
+    UiVietnameseFont::draw(tft,(Board::SCREEN_W-tw)/2,8,tm.c_str(),ink,bar,0,STATUS_ZONE_W);
+  else{tft.setCursor((Board::SCREEN_W-tw)/2,9);tft.print(tm);}
 
   // Right zone: two enlarged 18px slots. This board has no cellular modem/SIM.
   // status area is intentionally WiFi + battery only.
@@ -292,15 +291,15 @@ void SymbianUI::softkeys(const String &left, const String &center, const String 
     tft.drawFastHLine(0, y + 1, Board::SCREEN_W, 0x75A3);
     tft.drawFastVLine(Board::SCREEN_W/3, y+3, SOFTKEY_H-6, 0x96A6);
     tft.drawFastVLine((Board::SCREEN_W*2)/3, y+3, SOFTKEY_H-6, 0x96A6);
-  } else if (themeId == ThemeId::AmoledRed || themeId == ThemeId::External) {
+  } else if (themeId == ThemeId::AmoledRed || themeId == ThemeId::External || themeId == ThemeId::ModernDark) {
     tft.drawFastHLine(0, y + 1, Board::SCREEN_W, colors.accent);
     tft.drawFastVLine(Board::SCREEN_W/3, y+3, SOFTKEY_H-6, colors.border);
     tft.drawFastVLine((Board::SCREEN_W*2)/3, y+3, SOFTKEY_H-6, colors.border);
   }
   tft.setTextColor(ink, bar); tft.setTextFont(2); tft.setTextSize(1);
   textBold(4, y + 3, left, 2, ink, bar);
-  int cw = tft.textWidth(center); textBold((Board::SCREEN_W - cw) / 2, y + 3, center, 2, ink, bar);
-  int rw = tft.textWidth(right); textBold(Board::SCREEN_W - rw - 4, y + 3, right, 2, ink, bar);
+  int cw = textWidth(center,UiTypography::BODY); textBold((Board::SCREEN_W - cw) / 2, y + 3, center, 2, ink, bar);
+  int rw = textWidth(right,UiTypography::BODY); textBold(Board::SCREEN_W - rw - 4, y + 3, right, 2, ink, bar);
   tft.setTextFont(1);
   softkeysValid = true;
   snprintf(softLeft, sizeof(softLeft), "%s", left.c_str());
@@ -328,6 +327,8 @@ uint16_t SymbianUI::menuRowColor(int row) const {
     static const uint16_t redRows[4] = {0x0000, 0x0801, 0x1001, 0x0800};
     return redRows[row];
   }
+  if(themeId==ThemeId::ModernDark)
+    return themeMix565(colors.bg,colors.panel,row+1);
   if (themeId == ThemeId::External) return themeMix565(colors.bg, colors.panel, row + 1);
   return colors.bg;
 }
@@ -553,7 +554,7 @@ void SymbianUI::listItem(int row, const String &icon, const String &title, const
     tft.setCursor(textX + 1, y + 24);
     String line = sub;
     line = fitTextPixels(line, UiTypography::MICRO, Board::SCREEN_W - textX - 8);
-    if (UiVietnameseFont::hasUtf8(line.c_str()))
+    if (themeId==ThemeId::ModernDark || UiVietnameseFont::hasUtf8(line.c_str()))
       UiVietnameseFont::draw(tft,textX+1,y+24,line.c_str(),colors.dim,bg,0,Board::SCREEN_W-textX-9);
     else tft.print(line);
   }
@@ -568,7 +569,7 @@ void SymbianUI::gridItem(int slot, const String &icon, const String &title, bool
   const int y = CONTENT_TOP + row * GRID_CELL_H;
   const int w = GRID_CELL_W - 2;
   const int h = GRID_CELL_H;
-  const uint16_t base = (themeId == ThemeId::S60Green || themeId == ThemeId::AmoledRed || themeId == ThemeId::External) ? menuRowColor(row) : colors.bg;
+  const uint16_t base = (themeId == ThemeId::S60Green || themeId == ThemeId::AmoledRed || themeId == ThemeId::External || themeId==ThemeId::ModernDark) ? menuRowColor(row) : colors.bg;
   const uint16_t bg = selected ? colors.selected : base;
 
   tft.fillRect(x, y, w, h, bg);
@@ -581,7 +582,7 @@ void SymbianUI::gridItem(int slot, const String &icon, const String &title, bool
       // Original reference frame: discrete white glints at the top corners.
       tft.fillRect(x+3,y+3,17,2,0xF7FC);
       tft.fillRect(x+w-20,y+3,17,2,0xF7FC);
-    } else if (themeId == ThemeId::AmoledRed || themeId == ThemeId::External) {
+    } else if (themeId == ThemeId::AmoledRed || themeId == ThemeId::External || themeId == ThemeId::ModernDark) {
       VqeafIcons::focusFrame(tft,x+1,y+1,w-2,h-2,colors.accent,colors.border);
       tft.fillRect(x+3,y+3,w-6,2,colors.accent);
     } else {
@@ -687,13 +688,30 @@ void SymbianUI::message(const String &title, const String &line1, const String &
   tft.setTextSize(1);
   textBold(12, 50, title, 2, colors.text, colors.bg, true);
   tft.setTextFont(1);
-  tft.setCursor(12, 86); tft.print(line1);
-  if (line2.length()) { tft.setCursor(12, 106); tft.print(line2); }
-  if (line3.length()) { tft.setCursor(12, 126); tft.print(line3); }
+  if(themeId==ThemeId::ModernDark){
+    const String lines[]={line1,line2,line3};
+    for(int i=0;i<3;++i)if(lines[i].length()){
+      const String clipped=fitTextPixels(lines[i],UiTypography::MICRO,Board::SCREEN_W-24);
+      UiVietnameseFont::draw(tft,12,86+i*20,clipped.c_str(),colors.text,colors.bg,0,Board::SCREEN_W-24);
+    }
+  }else{
+    tft.setCursor(12, 86); tft.print(line1);
+    if (line2.length()) { tft.setCursor(12, 106); tft.print(line2); }
+    if (line3.length()) { tft.setCursor(12, 126); tft.print(line3); }
+  }
 }
 
 
 void SymbianUI::drawWallpaper() {
+  if(themeId==ThemeId::ModernDark){
+    // Midnight: vector-only atmospheric bands and restrained blue accent.
+    // Never allocate a wallpaper framebuffer or interfere with the 240x320 grid.
+    static const uint16_t shades[]={0x0863,0x0863,0x10C5,0x10E5,0x1928};
+    for(int i=0;i<5;++i)tft.fillRect(0,i*64,Board::SCREEN_W,64,shades[i]);
+    tft.drawFastHLine(12,187,216,colors.border);
+    tft.fillRect(12,187,46,2,colors.accent);
+    return;
+  }
   if (themeId == ThemeId::External) {
     // Simple optional banding: no Retro-Go asset copied, no extra framebuffer.
     tft.fillScreen(colors.bg);

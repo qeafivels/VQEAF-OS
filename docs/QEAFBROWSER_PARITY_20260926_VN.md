@@ -46,3 +46,20 @@ Nguồn: `nectvety-software/legacy-32-classic-E524546/projects/Qeafbrowser_v1.7`
 | Cookie | Host unit domain/path/HTTPS/Max-Age=0 và round trip | Nhiều Set-Cookie header, browser-grade RFC6265/Expires/SameSite |
 
 Lệnh chẩn đoán thiết bị: `pio run -e vqeaf_perf_diag -t upload`, `pio device monitor -b 115200` và đọc log `[QB][PERF]`. Giữ lại bản sao firmware đang dùng; không nạp CI Lua beta với khóa thử nghiệm lên thiết bị có ứng dụng đã ký.
+
+## Kết quả thử nghiệm trên ESP32-S3 thật (26/09/2026)
+
+Bo mạch ESP32-S3 N16R8 nối qua CH340 COM3/115200. Kiểm tra `esptool flash_id` xác nhận ESP32-S3, flash 16 MB; test chỉ ghi phân vùng app1 đang hoạt động 0x650000, không ghi NVS/partition table/bootloader. Đã sao lưu đầy đủ **16 MiB flash gốc** và phân vùng app1 vào máy Windows cục bộ, KHÔNG đưa bản sao chứa dữ liệu người dùng lên GitHub. Chẩn đoán UART dùng cấu hình thử `vqeaf_perf_diag_uart`, production vẫn giữ native USB CDC.
+
+| Phép đo/kiểm tra | Kết quả thực tế và giới hạn |
+|---|---|
+| LCD renderer Overview | 64 lần vẽ thật lên ST7789, zoom x1..x8, dữ liệu trang 72 dòng và đầu vào chuyển động **giả lập trong firmware**; render trung bình **52,394 µs/frame**, p95 **53,099 µs**, cao nhất **59,652 µs**; thông lượng liên tiếp đo được **19 FPS**. Đây là tốc độ vẽ thực tế, **không phải** FPS trình duyệt khi người dùng cuộn trang thực hay giới hạn 30 Hz. |
+| Độ trễ đầu vào | `input_events=0` trong các cửa sổ ghi log; **chưa thể đo** phím vật lý đến hiển thị hoặc input-dispatch p95. Thời gian xử lý điều hướng giả lập/OS khi chạy bench ghi ~117–118 ms, KHÔNG thay thế độ trễ phím. |
+| SD trước kiểm thử | `diag sd rw`: **PASS**, ghi/đọc 4096 byte, kiểm CRC32; xóa scratch thành công. |
+| Cookie/cache sau reset thật | `diag qb stage`: **PASS** cho HTML và cookie thử nghiệm, thumbnail SD_FALLBACK_PASS. Sau lệnh `diag qb reboot` (ESP.restart), `diag qb verify`: **PASS** HTML, cookie, CRC + pixel thumbnail; `boot_uptime_ms=4248` (chứng cứ cold boot). Đã gọi `diag qb cleanup` và nhận `cleanup=COMPLETE`. |
+| LittleFS | Mount LittleFS trên bo báo **corrupted dir pair**, không format hoặc thay đổi phân vùng cũ; tự chuyển sang cache thumbnail SD. Kiểm chứng cold reboot hiện áp dụng **SD fallback**, chưa chứng minh LittleFS tier trên chính bo này. |
+| Dữ liệu người dùng | Fixture dùng cookie `qb_probe=synthetic` và URL `.invalid`; không chạm file cookie/bookmark người dùng, không truy cập website thật. |
+
+**Diễn giải:** thông lượng tile native ~19 FPS thấp hơn hạn mức vẽ lại 30 Hz, nên giới hạn hiện thời đến từ thời gian vẽ nhiều khung preview lên SPI LCD chứ không nhất thiết từ vòng lặp tính toán Q8. Cần đo riêng khả năng tái sử dụng tile/partial-redraw nếu muốn 30 FPS. Dữ liệu cookie thực nhạy cảm chỉ có thể nghiệm thu sau security review (plaintext SD hiện chưa phù hợp đăng nhập nhạy cảm).
+
+**Trạng thái trả lại thiết bị:** kết quả thử nghiệm đã kết thúc và cần đối chiếu hash ảnh app1 được đọc lại với bản sao riêng sau khi nạp lại firmware gốc; không gộp PR trước kiểm tra cuối cùng.

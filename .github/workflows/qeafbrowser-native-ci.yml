@@ -11,6 +11,7 @@ on:
       - 'tools/browser_overview_dirty_host.cpp'
       - 'tools/test_browser_overview_integration.py'
       - 'tools/test_lua_qeapp_uart.py'
+      - 'tools/test_qeapp_icon_list.py'
       - 'tools/test_browser_feature_parity.py'
       - 'tools/test_browser_recovery_probe.py'
       - 'tools/test_browser_recovery_host.py'
@@ -42,6 +43,7 @@ jobs:
           /tmp/qb-dirty-host
           python tools/test_browser_overview_integration.py
           python tools/test_lua_qeapp_uart.py
+          python tools/test_qeapp_icon_list.py
           python tools/test_browser_feature_parity.py
           python tools/test_browser_recovery_probe.py
           python tools/test_browser_recovery_host.py

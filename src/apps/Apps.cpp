@@ -1465,46 +1465,62 @@ void BrowserApp::redrawOverview(AppContext &ctx) {
   d.fillRect(0,29,240,269,c.bg);
   d.setTextFont(1);d.setTextColor(c.text,c.bg);
   d.setCursor(8,37);d.print("Page Overview");
-  d.setCursor(192,37);d.printf("x%d",motion.zoomValue());
-  const int left=12, top=56, width=212, height=210;
-  const int docHeight=ctx.browser.imageCount()>0?height-58:height;
-  d.fillRect(left,top,width,height,c.panel);
-  d.drawRect(left,top,width,height,c.dim);
-  // Document preview is built from parsed line geometry without an extra
-  // framebuffer. It is intentionally bounded to visible preview lines.
-  const int scale=motion.zoomValue();
-  const int lineHeight=max(2,8/scale);
-  const int shown=min(ctx.browser.lineCount(),(docHeight-4)/lineHeight);
-  const int first=min(max(0,motion.targetPixel()/16-shown/2),
-                      max(0,ctx.browser.lineCount()-shown));
-  for(int i=0;i<shown;++i){
-    const BrowserLine &line=ctx.browser.lineAt(first+i);
-    int ly=top+3+i*lineHeight;
-    int n=0;while(line.text[n]&&n<50)++n;
-    int w=min(width-16,max(4,n*(scale>=5?1:3)/scale));
-    uint16_t ink=line.link>=0?c.accent:c.dim;
-    d.fillRect(left+5,ly,w,max(1,lineHeight-1),ink);
-  }
-  int cursorY=top+3+(motion.targetPixel()/16-first)*lineHeight;
-  int cursorH=max(8,(208/16)*lineHeight);
-  cursorY=constrain(cursorY,top+2,top+docHeight-10);
-  if(cursorY+cursorH>top+docHeight-2)cursorH=top+docHeight-2-cursorY;
-  d.drawRect(left+2,cursorY,width-4,max(3,cursorH),c.accent);
-  // Up to three real JPEG/PNG previews. Missing/unverified images retain
-  // accessible text fallback; network fetch never occurs from this renderer.
-  for(int i=0;i<min(3,ctx.browser.imageCount());++i) {
-    const BrowserImage &img=ctx.browser.imageAt(i);
-    const int x=left+5+i*70,y=top+docHeight+4;
-    d.fillRect(x,y,64,48,c.bg);
-    if(!thumbs.draw(d,img.url,x,y)){
-      d.setTextColor(c.dim,c.bg);d.setCursor(x+4,y+19);
-      d.print("IMAGE");
+  d.setCursor(198,37);d.printf("x%d",motion.zoomValue());
+  const int perTile=max(3,25/motion.zoomValue());
+  const int total=max(1,(ctx.browser.lineCount()+perTile-1)/perTile);
+  const int selected=min(total-1,motion.targetPixel()/16/perTile);
+  const int firstTile=min(max(0,selected-4),max(0,total-9));
+  const int tileW=64,tileH=58;
+  for(int i=0;i<9;++i){
+    const int tileIndex=firstTile+i;
+    const int x=17+(i%3)*69, y=58+(i/3)*64;
+    d.fillRect(x,y,tileW,tileH,c.panel);
+    d.drawRect(x,y,tileW,tileH,c.dim);
+    if(tileIndex>=total)continue;
+    const int first=tileIndex*perTile;
+    const int last=min(ctx.browser.lineCount(),first+perTile);
+    int imageIndex=-1;
+    for(int k=0;k<ctx.browser.imageCount();++k){
+      const int line=ctx.browser.imageAt(k).line;
+      if(line>=first&&line<last){imageIndex=k;break;}
     }
-    d.drawRect(x,y,64,48,c.dim);
+    bool thumbnail=false;
+    if(imageIndex>=0){
+      thumbnail=thumbs.draw(d,ctx.browser.imageAt(imageIndex).url,x,y+8);
+    }
+    if(!thumbnail) {
+      const int rows=min(8,last-first);
+      for(int j=0;j<rows;++j){
+        const int line=first+(j*max(1,last-first))/max(1,rows);
+        const BrowserLine &entry=ctx.browser.lineAt(min(last-1,line));
+        int chars=0;while(entry.text[chars]&&chars<50)++chars;
+        const int w=min(54,max(4,chars*2/motion.zoomValue()));
+        d.fillRect(x+5,y+7+j*6,w,3,entry.link>=0?c.accent:c.dim);
+      }
+      if(imageIndex>=0){d.setTextColor(c.accent,c.panel);
+        d.setCursor(x+5,y+48);d.print("IMG");}
+    }
+    if(tileIndex==selected) {
+      // Opera Mini-era overview cursor: blue frame, corner handles,
+      // center crosshair; each tile is a bounded page-preview region.
+      d.drawRect(x-1,y-1,tileW+2,tileH+2,c.accent);
+      d.fillRect(x-1,y-1,5,5,c.accent);
+      d.fillRect(x+tileW-4,y-1,5,5,c.accent);
+      d.fillRect(x-1,y+tileH-4,5,5,c.accent);
+      d.fillRect(x+tileW-4,y+tileH-4,5,5,c.accent);
+      d.drawFastHLine(x+tileW/2-3,y+tileH/2,7,c.accent);
+      d.drawFastVLine(x+tileW/2,y+tileH/2-3,7,c.accent);
+    }
   }
-  d.fillRect(0,273,240,24,c.bg);
-  d.setTextColor(c.dim,c.bg);d.setCursor(10,280);
-  d.print("UP/DN Pan   LEFT/RIGHT Zoom");
+  const int track=198;
+  d.drawFastVLine(232,58,track,c.dim);
+  const int progress=motion.maxScroll()?
+    (motion.targetPixel()*(track-18))/motion.maxScroll():0;
+  d.fillRect(230,58+progress,4,18,c.accent);
+  d.fillRect(0,261,240,36,c.bg);
+  d.setTextColor(c.dim,c.bg);d.setCursor(12,268);
+  d.printf("Tile %d/%d   Zoom x%d",selected+1,total,motion.zoomValue());
+  d.setCursor(12,283);d.print("UP/DN Pan  LEFT/RIGHT Zoom");
   ctx.ui.softkeys("Options","Select","Back");
 }
 

@@ -15,6 +15,7 @@
 #include "../services/WiFiProfileStore.h"
 #include "../services/WiFiConnectionService.h"
 #include "../services/BrowserService.h"
+#include "../services/BrowserMotion.h"
 #include "../services/ImageViewerService.h"
 #include "../services/ShellService.h"
 #include "../services/ThemeFileService.h"
@@ -280,7 +281,9 @@ public:
   void enter(AppContext &ctx);
   void draw(AppContext &ctx);
   ScreenId handle(AppContext &ctx, const KeyEvent &e);
+  void tick(AppContext &ctx, bool visible);
 private:
+  BrowserMotion motion;
   int offset = 0;
   int selectedLink = -1;
   bool urlEntry = false;
@@ -288,6 +291,8 @@ private:
   PopupState popup;
   void loadHome(AppContext &ctx);
   void redrawBody(AppContext &ctx);
+  void redrawOverview(AppContext &ctx);
+  void resetMotion(AppContext &ctx);
   void moveLink(AppContext &ctx, int direction);
 };
 

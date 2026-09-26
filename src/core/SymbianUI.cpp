@@ -1120,6 +1120,9 @@ void SymbianUI::dialog(const String &title, const String &line1, const String &l
 }
 
 void SymbianUI::transitionOut() {
+  // Midnight deliberately uses a cut rather than a five-pass SPI stripe wipe:
+  // on a 240x320 ST7789 the erase passes remain visible as keypress flicker.
+  if(themeId==ThemeId::ModernDark)return;
   // Lightweight S60-style sweep. It never blanks the whole LCD, avoiding the
   // visible black flash of the old center-closing transition.
   const int top = CONTENT_TOP;

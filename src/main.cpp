@@ -721,6 +721,14 @@ void setup() {
   Serial.printf("[VQEAF][MEM] flash=%lu psram=%lu free_heap=%lu\n",
                 (unsigned long)flashBytes, (unsigned long)psramBytes,
                 (unsigned long)ESP.getFreeHeap());
+#if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
+  // Feature proof in real UART logs: stock vqeaf_os_uart does NOT print this.
+  // This is not a claim that any particular app has been installed or run.
+  Serial.println("[VQEAF][LUA] runtime=ENABLED engine=Lua5.4.8 signed_qeapp2=REQUIRED "
+                 "heap_limit=196608 viewport=240x270 frame_cap_hz=20");
+  if (psramBytes < 8UL*1024UL*1024UL)
+    Serial.println("[VQEAF][LUA][WARN] insufficient PSRAM; app launch disabled");
+#endif
   if (flashBytes < 16UL * 1024UL * 1024UL)
     Serial.println("[VQEAF][WARN] flash below N16R8 requirement");
   if (psramBytes < 8UL * 1024UL * 1024UL)

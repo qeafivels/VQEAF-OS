@@ -117,7 +117,8 @@ public:
     return true;
   }
   bool requestHeader(const char *url,char *out,size_t cap) const {
-    if(!out||!cap)return false;out[0]=0;
+    if(!out||!cap)return false;
+    out[0]=0;
     char host[96],path[192];bool https=false;
     if(!url||!urlParts(url,host,sizeof(host),path,sizeof(path),https))return false;
     size_t pos=0;
@@ -175,7 +176,8 @@ private:
     for(size_t i=0;i<n;++i) {
       unsigned char x=(unsigned char)tolower((unsigned char)a[i]);
       unsigned char y=(unsigned char)tolower((unsigned char)b[i]);
-      if(x!=y)return x-y;if(!x)return 0;
+      if(x!=y)return x-y;
+      if(!x)return 0;
     }return 0;
   }
 };

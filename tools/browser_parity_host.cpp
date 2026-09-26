@@ -10,6 +10,7 @@ static void motionTest(){
   assert(m.documentPixels()==6400&&m.maxScroll()==6192);
   for(int i=0;i<40;++i)m.scrollPixels(16);
   assert(m.targetPixel()>0);
+  m.release();
   m.tick(100);
   for(uint32_t t=117;t<2500;t+=17)m.tick(t);
   assert(m.pixel()>=0&&m.pixel()<=m.maxScroll());

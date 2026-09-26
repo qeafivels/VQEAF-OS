@@ -93,7 +93,7 @@ for cp in ("0x0041","0x0061","0x00E1","0x1EA1","0x1EC7"):
 print("PASS regular/bold glyph sets cover basic Latin + Vietnamese NFC")
 
 # Font atlas completeness: both roles have precisely the same supported points.
-rg=re.compile(r"^\\{0x([0-9A-F]{4}),\\s*(\\d+),\\s*\\{([^}]+)\\}\\},",re.M)
+rg=re.compile(r"^\{0x([0-9A-F]{4}),\s*(\d+),\s*\{([^}]+)\}\},",re.M)
 found=rg.findall(glyphs)
 assert len(found)>=450,len(found)
 half=len(found)//2

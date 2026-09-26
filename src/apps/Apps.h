@@ -288,6 +288,9 @@ private:
   BrowserThumbnailCache thumbs;
   int nextThumb=0;
   uint32_t lastThumbAttempt=0;
+  uint32_t lastMotionPaint=0;
+  uint32_t lastMetrics=0;
+  uint32_t motionFrames=0;
   int offset = 0;
   int selectedLink = -1;
   bool urlEntry = false;

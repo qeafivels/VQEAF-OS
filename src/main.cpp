@@ -649,6 +649,26 @@ static void diagCommand(const String &cmd) {
     return;
   }
 #endif
+  if(c=="diag keys"){
+    // Read-only GPIO sampler. Never synthesizes clicks or steals focus from
+    // applications. Press/release a physical button, then query again.
+    static const struct {const char* name; int pin;} pins[]={
+      {"MENU",Board::KEY_MENU},{"UP",Board::KEY_UP},
+      {"A",Board::KEY_A},{"LEFT",Board::KEY_LEFT},
+      {"START",Board::KEY_START},{"RIGHT",Board::KEY_RIGHT},
+      {"OPTION",Board::KEY_OPTION},{"DOWN",Board::KEY_DOWN},
+      {"B",Board::KEY_B},{"SELECT",Board::KEY_SELECT}
+    };
+    uint16_t pressed=0;
+    for(unsigned i=0;i<sizeof(pins)/sizeof(pins[0]);++i){
+      if(digitalRead(pins[i].pin)==LOW)pressed|=(1u<<i);
+    }
+    Serial.printf("[VQEAF][KEYS] pressed_mask=0x%03X",unsigned(pressed));
+    for(unsigned i=0;i<sizeof(pins)/sizeof(pins[0]);++i)
+      Serial.printf(" %s=%u",pins[i].name,unsigned(bool(pressed&(1u<<i))));
+    Serial.println();
+    return;
+  }
   if(c=="diag theme status"){
     const ThemeId chosen=settings.data().theme;
     Serial.printf("[VQEAF][THEME][STATUS] id=%u name=%s modern_font=%u safe_mode=%u\n",
@@ -684,6 +704,7 @@ static void diagCommand(const String &cmd) {
     Serial.println("[S3DIAG] SD removal: stop media, unplug, observe event, reinsert, diag sd rw");
     Serial.println("[S3DIAG] diag app icons - verify installed icon files without displaying private app names");
     Serial.println("[S3DIAG] diag theme status - report persisted theme and typography mode");
+    Serial.println("[S3DIAG] diag keys - read-only raw 10-button GPIO snapshot, 1=pressed");
 #if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
     Serial.println("[S3DIAG] diag lua status | diag lua probe (fixed synthetic VM, no files)");
 #endif

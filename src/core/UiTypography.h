@@ -1,8 +1,9 @@
 #pragma once
 #include <stdint.h>
 // Central UI text roles for the ST7789 native 240x320 portrait panel.
-// ASCII uses existing TFT_eSPI rasters; UTF-8 NFC Vietnamese uses generated
-// fixed bitmap glyphs (UiVietnameseFont.h) and never allocates on each frame.
+// Midnight uses unified regular/bold DejaVu-derived, pre-rasterized ASCII and
+// Vietnamese glyphs in UiVietnameseFont.h. Previous skins retain their legacy
+// TFT_eSPI raster for ASCII. No TTF engine or frame-time allocation.
 namespace UiTypography {
   static constexpr uint8_t MICRO=1;   // status details / hints
   static constexpr uint8_t CAPTION=1; // centered 3x4 menu label

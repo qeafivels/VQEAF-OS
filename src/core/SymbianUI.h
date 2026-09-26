@@ -79,7 +79,15 @@ private:
   ThemeColors colors = themeFor(ThemeId::ModernDark);
   LauncherStyle launcherSkin = LauncherStyle::fromPalette(themeFor(ThemeId::ModernDark));
 
-  bool chromeValid = false;
+  // A popup D-pad move should repaint two 31px rows, not the entire
+  // 214x161px overlay. Invalidated whenever underlying content is repainted.
+  bool popupCacheValid = false;
+  const char *const *popupCacheItems = nullptr;
+  int popupCacheCount = 0;
+  int popupCacheSelected = -1;
+  int popupCacheOffset = -1;
+  int popupCacheVisible = 0;
+    bool chromeValid = false;
   bool softkeysValid = false;
   bool chromeWifi = false;
   bool chromeBle = false;

@@ -21,3 +21,7 @@ build_reports/
 src/services/QeappTrustKeyLuaBeta.h
 # Lua 5.4 source is bootstrapped by tools/bootstrap_lua.py with exact SHA256.
 lib/VqeafLua54/src/
+
+# Hardware lab outputs may contain private flash, NVS, auth cookies and raw serial.
+local_hw_results/
+qb_current_board*.log

@@ -31,6 +31,14 @@ checks={
  "Midnight ASCII AND UTF-8 share one DejaVu-based raster":
     ui.count('themeId==ThemeId::ModernDark || UiVietnameseFont::hasUtf8')>=4 and
     "UiVietnameseFont::measure(text.c_str()" in ui,
+ "Documented 11/13px regular/bold baseline avoids list clipping":
+    "11,14" in (r/"tools/generate_vietnamese_glyphs.py").read_text(encoding="utf-8") and
+    "LIST_DETAIL_OFFSET_Y=22;" in (r/"src/core/UiTypography.h").read_text(encoding="utf-8") and
+    "REGULAR_GLYPH_H=18;" in (r/"src/core/UiTypography.h").read_text(encoding="utf-8"),
+ "Pixel-safe Midnight ellipsis and popup focus use palette tokens":
+    'const String marker=themeId==ThemeId::ModernDark ? "..." : "~";' in ui and
+    "themeId==ThemeId::ModernDark?colors.accent:TFT_WHITE" in ui and
+    "themeId==ThemeId::ModernDark?colors.border:0xBDF7" in ui,
  "Prominent 2x modern clock uses the same safe DejaVu bitmap":
     "inline int drawScaled(" in glyphs and ui.count("UiVietnameseFont::drawScaled(")>=3,
  "Chronometer, main menu, footer and lists use modern font metrics":
@@ -73,7 +81,9 @@ def contrast(a,b):
 for label,fg,bg in (
     ("body",palette[3],palette[0]),("header",palette[6],palette[5]),
     ("secondary",palette[4],palette[0]),("selected",palette[3],palette[2]),
-    ("popup",palette[10],palette[9])):
+    ("popup",palette[10],palette[9]),
+    ("secondary-on-card",palette[4],palette[1]),
+    ("focus-accent-on-selection",palette[7],palette[2])):
     ratio=contrast(fg,bg)
     assert ratio>=4.5,(label,ratio)
     print(f"PASS {label} LCD palette contrast: {ratio:.2f}:1")
@@ -81,3 +91,14 @@ for label,fg,bg in (
 for cp in ("0x0041","0x0061","0x00E1","0x1EA1","0x1EC7"):
     assert glyphs.count("{"+cp+",")>=2, cp
 print("PASS regular/bold glyph sets cover basic Latin + Vietnamese NFC")
+
+# Font atlas completeness: both roles have precisely the same supported points.
+rg=re.compile(r"^\\{0x([0-9A-F]{4}),\\s*(\\d+),\\s*\\{([^}]+)\\}\\},",re.M)
+found=rg.findall(glyphs)
+assert len(found)>=450,len(found)
+half=len(found)//2
+regular=found[:half]; bold=found[half:]
+assert len(regular)==len(bold)==229 and [x[0] for x in regular]==[x[0] for x in bold]
+assert all(1<=int(x[1])<=16 and len(x[2].split(','))==18 for x in found)
+assert "role==1?18:15" not in glyphs and "tft.fillRect(x,y,min(clipW,count),18,bg)" in glyphs
+print("PASS exact 229 Latin/NFC Vietnamese regular + bold glyphs, 18-row safe draw")

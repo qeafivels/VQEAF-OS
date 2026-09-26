@@ -2,24 +2,25 @@
 
 void SettingsStore::begin() {
   prefs.begin("symbian-s3", false);
-  // Keep the original NVS namespace when upgrading older firmware.
-  // First-install follows the user's screenshot-style Lime reference.
-  // Existing v2.x settings remain untouched (including user-selected Night).
-  uint8_t themeRev = prefs.getUChar("themeRev", 0);
-  uint8_t rawTheme = prefs.getUChar("theme", static_cast<uint8_t>(ThemeId::S60Green));
-  if (themeRev < 1) {
-    // Older firmware could save theme without a revision. Keep that choice;
-    // only a truly fresh installation starts in the screenshot Lime theme.
-    cfg.theme = prefs.isKey("theme") && rawTheme <= static_cast<uint8_t>(ThemeId::External)
-                  ? static_cast<ThemeId>(rawTheme) : ThemeId::S60Green;
-    prefs.putUChar("theme", static_cast<uint8_t>(cfg.theme));
-    prefs.putUChar("themeRev", 3);
-  } else {
-    if (rawTheme > static_cast<uint8_t>(ThemeId::External)) rawTheme = static_cast<uint8_t>(ThemeId::S60Green);
-    cfg.theme = static_cast<ThemeId>(rawTheme);
-    // Preserve previously stored user choice: the v2.3 pixel pass must NEVER
-    // silently migrate an existing Lime or imported .vqeaf theme to Night.
-    if (themeRev < 3) prefs.putUChar("themeRev", 3);
+  // Keep existing NVS namespace and numeric IDs; External must remain 4.
+  // v4 makes Midnight the default for new installs and migrates the previous
+  // factory Lime default, but retains explicitly selected other/custom themes.
+  const uint8_t themeRev=prefs.getUChar("themeRev",0);
+  const bool hadTheme=prefs.isKey("theme");
+  const uint8_t saved=prefs.getUChar("theme",static_cast<uint8_t>(ThemeId::ModernDark));
+  const bool valid=saved<=static_cast<uint8_t>(ThemeId::ModernDark);
+  if(!hadTheme||!valid){
+    cfg.theme=ThemeId::ModernDark;
+  }else if(themeRev<4&&saved==static_cast<uint8_t>(ThemeId::S60Green)){
+    // The device's previous shipping default; requested modern replacement.
+    // Users may re-select Lime from Themes after the one-time migration.
+    cfg.theme=ThemeId::ModernDark;
+  }else{
+    cfg.theme=static_cast<ThemeId>(saved);
+  }
+  if(themeRev<4||!hadTheme||!valid){
+    prefs.putUChar("theme",static_cast<uint8_t>(cfg.theme));
+    prefs.putUChar("themeRev",4);
   }
   cfg.brightness = prefs.getUChar("bright", 90);
   cfg.volume = prefs.getUChar("volume", 80);
@@ -32,7 +33,7 @@ void SettingsStore::begin() {
   }
   customThemePath = prefs.getString("themeFile", "");
   if (cfg.theme == ThemeId::External && (customThemePath.length() == 0 || customThemePath.length() > 119))
-    cfg.theme = ThemeId::Classic;
+    cfg.theme = ThemeId::ModernDark;
   noteText = prefs.getString("note", "");
 }
 

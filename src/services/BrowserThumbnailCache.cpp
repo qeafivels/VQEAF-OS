@@ -181,8 +181,33 @@ void BrowserThumbnailCache::saveFlash(uint64_t key,const Tile &tile) {
   if(!ok){fs->remove(temp);return;}
   fs->remove(target);
   if(!fs->rename(temp,target)){fs->remove(temp);return;}
-  if(!persistentIsLittleFS&&fallbackStorage)
+  if(persistentIsLittleFS) {
+    // Prune ONLY this browser's dedicated folder, never other OS resources.
+    // File order here is approximate rather than persistent LRU.
+    File folder=LittleFS.open("/qbthumb",FILE_READ);
+    int count=0;
+    if(folder&&folder.isDirectory()){
+      File candidate=folder.openNextFile();
+      while(candidate){++count;candidate.close();candidate=folder.openNextFile();}
+      folder.close();
+    }
+    while(count>24){
+      folder=LittleFS.open("/qbthumb",FILE_READ);
+      if(!folder||!folder.isDirectory())break;
+      bool removed=false;
+      File candidate=folder.openNextFile();
+      while(candidate){
+        String old=candidate.name();
+        candidate.close();
+        if(old!=target&&LittleFS.remove(old)){removed=true;--count;break;}
+        candidate=folder.openNextFile();
+      }
+      folder.close();
+      if(!removed)break;
+    }
+  } else if(fallbackStorage) {
     fallbackStorage->pruneFlatDirectory(StoragePaths::CACHE_THUMBS,24,256UL*1024UL);
+  }
 }
 bool BrowserThumbnailCache::has(const char *url) {
   if(!initialized||!url||!url[0])return false;
@@ -210,6 +235,7 @@ bool BrowserThumbnailCache::fetchAndDecode(const char *url,uint16_t *pixels) {
   for(int hop=0;hop<4;++hop) {
     HTTPClient http;http.setConnectTimeout(5000);http.setTimeout(6000);
     http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
+    http.setUserAgent("Opera/9.80 (J2ME/MIDP; Opera Mini/4.5) Qeafbrowser-VQEAF/2.2");
     const char *headers[]={"Content-Type","Transfer-Encoding"};
     http.collectHeaders(headers,2);
     WiFiClientSecure secure;String err;

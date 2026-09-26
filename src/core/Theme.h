@@ -25,7 +25,8 @@ enum class ThemeId : uint8_t {
   Black = 1,
   S60Green = 2,
   AmoledRed = 3,
-  External = 4
+  External = 4,
+  ModernDark = 5  // append only: legacy NVS theme IDs must stay stable
 };
 
 inline const char *themeName(ThemeId id) {
@@ -34,11 +35,31 @@ inline const char *themeName(ThemeId id) {
     case ThemeId::AmoledRed: return "AMOLED Red";
     case ThemeId::Black: return "Black";
     case ThemeId::External: return "SD card theme";
+    case ThemeId::ModernDark: return "VQEAF Midnight";
     default: return "VQEAF Night";
   }
 }
 
 inline ThemeColors themeFor(ThemeId id) {
+  if (id == ThemeId::ModernDark) {
+    // VQEAF Midnight: restrained navy surfaces, readable cool-white text,
+    // blue-violet focus and subtle separators. No dynamic theme allocation.
+    return {
+      0x0863, // bg #0B0F18
+      0x10E5, // panel #151C2B
+      0x21AA, // selected #263652
+      0xEFBF, // text #ECF4FF
+      0x9D79, // dim #9EADCA
+      0x10C4, // chrome #101826
+      0xEFBF, // chromeText
+      0x647F, // accent #658CFF
+      0xFAAE, // danger #FF5477
+      0x10E6, // popup #151E30
+      0xF7BF, // popupText
+      0x29CC, // popupSelected #283A60
+      0x322C  // border #354664
+    };
+  }
   if (id == ThemeId::S60Green) {
     return {
       0x8E44, // bg - lime green

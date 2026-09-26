@@ -42,6 +42,9 @@ public:
 
   bool begin(StorageService *storage = nullptr);
   bool available() const { return poolsReady; }
+#if defined(VQEAF_PERF_DIAG)
+  void diagnosticPage(); // Isolated 72-line layout, no network or persistence.
+#endif
   bool load(const String &inputUrl);
   bool reload();
   bool goBack();

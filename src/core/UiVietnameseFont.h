@@ -524,5 +524,33 @@ inline int draw(TFT_eSPI &tft,int x,int y,const char *s,uint16_t fg,uint16_t bg,
   }
   return x-start;
 }
+// Midnight's large clock uses the same verified NFC/ASCII bitmap glyphs
+// at integer scale. No runtime font files, glyph cache, alpha raster or heap.
+inline int drawScaled(TFT_eSPI &tft,int x,int y,const char *s,uint16_t fg,
+                      uint16_t bg,uint8_t role,uint8_t scale,int clipW=240) {
+  if(!s||!scale||clipW<=0)return 0;
+  const int start=x;
+  const int total=measure(s,role)*scale;
+  tft.fillRect(x,y,min(clipW,total),18*scale,bg);
+  while(*s){
+    const uint32_t cp=next(s);
+    const Glyph *g=lookup(cp>65535?'?':cp,role);
+    const int step=g->advance*scale;
+    if(x+step>start+clipW)break;
+    for(int yy=0;yy<18;++yy){
+      const uint16_t bits=g->rows[yy];
+      int xx=0;
+      while(xx<16){
+        while(xx<16 && !(bits&(1u<<xx)))++xx;
+        if(xx>=16)break;
+        const int first=xx;
+        while(xx<16 && (bits&(1u<<xx)))++xx;
+        tft.fillRect(x+first*scale,y+yy*scale,(xx-first)*scale,scale,fg);
+      }
+    }
+    x+=step;
+  }
+  return x-start;
+}
 } // UiVietnameseFont
 

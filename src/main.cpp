@@ -883,6 +883,7 @@ void loop() {
   }
 #endif
   galleryApp.tick(appCtx, screen == ScreenId::Gallery && !osBackConfirm.active());
+  browserApp.tick(appCtx, screen == ScreenId::Browser && !osBackConfirm.active());
   wifiApp.tick(appCtx, screen == ScreenId::WiFi);
   systemService.update(notifications);
   updateWirelessNotifications();

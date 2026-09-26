@@ -2,7 +2,7 @@ name: VQEAF native Qeafbrowser ESP32-S3
 on:
   workflow_dispatch:
   push:
-    branches: [feat/qeafbrowser-native-v251]
+    branches: [feat/qeafbrowser-native-v251, feat/qeafbrowser-parity-20260926]
     paths:
       - 'src/**'
       - 'platformio.ini'

@@ -649,9 +649,33 @@ static void diagCommand(const String &cmd) {
     return;
   }
 #endif
+  if(c=="diag app icons"){
+    if(!storage.mounted()){
+      Serial.println("[VQEAF][QEAPP][ICONS] result=NO_SD");return;
+    }
+    // Read-only diagnostic. Do not print IDs, filesystem paths or app data.
+    uint16_t *pixels=static_cast<uint16_t*>(heap_caps_malloc(
+        Qeapp::ICON_BYTES,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
+    if(!pixels){Serial.println("[VQEAF][QEAPP][ICONS] result=NO_PSRAM");return;}
+    unsigned expected=0,ok=0,failed=0;
+    for(int i=0;i<appInstaller.count();++i){
+      const auto &entry=appInstaller.at(i);
+      const bool hasIcon=entry.info.hasIcon;
+      const bool loaded=hasIcon&&appInstaller.loadIcon(entry.info.id,pixels);
+      expected+=hasIcon;ok+=loaded;failed+=hasIcon&&!loaded;
+      Serial.printf("[VQEAF][QEAPP][ICONS] index=%d signed_icon=%u verified_pixels=%u\n",
+        i,unsigned(hasIcon),unsigned(loaded));
+      yield();
+    }
+    heap_caps_free(pixels);
+    Serial.printf("[VQEAF][QEAPP][ICONS] result=%s total=%d expected=%u ok=%u failed=%u\n",
+      failed?"FAIL":"PASS",appInstaller.count(),expected,ok,failed);
+    return;
+  }
   if (c == "diag help") {
     Serial.println("[S3DIAG] diag sd status | diag sd rw | diag tls valid|expired|wrong|self|host <domain>");
     Serial.println("[S3DIAG] SD removal: stop media, unplug, observe event, reinsert, diag sd rw");
+    Serial.println("[S3DIAG] diag app icons - verify installed icon files without displaying private app names");
 #if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
     Serial.println("[S3DIAG] diag lua status | diag lua probe (fixed synthetic VM, no files)");
 #endif

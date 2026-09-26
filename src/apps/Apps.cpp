@@ -1425,6 +1425,7 @@ void BrowserApp::enter(AppContext &ctx) {
 void BrowserApp::resetMotion(AppContext &ctx) {
   motion.reset(ctx.browser.lineCount());
   nextThumb=0;lastThumbAttempt=0;
+  lastMotionPaint=0;lastMetrics=0;motionFrames=0;
   offset=0;
 }
 
@@ -1527,10 +1528,28 @@ void BrowserApp::redrawOverview(AppContext &ctx) {
 void BrowserApp::tick(AppContext &ctx,bool visible) {
   if(!visible || ctx.keyboard.active() || popup.open)return;
   const uint32_t now=millis();
-  if(motion.tick(now)) {
-    if(motion.overview())redrawOverview(ctx);
-    else redrawBody(ctx);
+  // 30Hz upper bound: continuous full-document LCD writes at 60Hz
+  // could starve keypad dispatch on a 40MHz SPI panel.
+  if((uint32_t)(now-lastMotionPaint)>=33UL) {
+    lastMotionPaint=now;
+    if(motion.tick(now)) {
+      if(motion.overview())redrawOverview(ctx);
+      else redrawBody(ctx);
+      ++motionFrames;
+    }
   }
+#if defined(VQEAF_PERF_DIAG)
+  if(!lastMetrics)lastMetrics=now;
+  const uint32_t elapsed=now-lastMetrics;
+  if(elapsed>=5000UL) {
+    Serial.printf("[QB][PERF] anim_fps=%lu heap8=%lu psram=%lu thumb_ram=%d thumb_fs=%d thumb_fail=%d\\n",
+      (unsigned long)(motionFrames*1000UL/elapsed),
+      (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+      (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+      thumbs.ramHits(),thumbs.flashHits(),thumbs.failedRequests());
+    motionFrames=0;lastMetrics=now;
+  }
+#endif
   // Fetch at most one verified image per interval, only in Overview, never
   // on a draw callback. Failed requests are skipped until next page visit.
   const int count=min(3,ctx.browser.imageCount());
@@ -1562,7 +1581,8 @@ void BrowserApp::moveLink(AppContext &ctx,int direction){int n=ctx.browser.linkC
 
 ScreenId BrowserApp::handle(AppContext &ctx,const KeyEvent &e){
   if(ctx.keyboard.active()){if(ctx.keyboard.handle(e)){if(ctx.keyboard.accepted()){String u=ctx.keyboard.value();ctx.ui.message("Qeafbrowser","Loading...",u);ctx.browser.load(u);resetMotion(ctx);selectedLink=ctx.browser.linkCount()?0:-1;}draw(ctx);}return ScreenId::Browser;}
-  if(!e.pressed||e.longPress)return ScreenId::Browser;
+  if(!e.pressed){if(e.key==Key::Up||e.key==Key::Down)motion.release();return ScreenId::Browser;}
+  if(e.longPress)return ScreenId::Browser;
   if(ctx.system.safeMode()){if(e.key==Key::A||e.key==Key::B)return launchedFromPackage?ScreenId::Applications:ScreenId::Launcher;return ScreenId::Browser;}
   if(popup.open){if(e.key==Key::Start||e.key==Key::Select){int choice=popup.index;popup.close();if(choice==0){String initial=ctx.browser.url();if(initial.startsWith("mtt:"))initial="";ctx.keyboard.open("Web address",initial,false);draw(ctx);return ScreenId::Browser;}if(choice==1){loadHome(ctx);draw(ctx);return ScreenId::Browser;}if(choice==2){ctx.ui.message("Qeafbrowser","Reloading...",ctx.browser.url());ctx.browser.reload();resetMotion(ctx);selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);return ScreenId::Browser;}if(choice==3){ctx.browser.goBack();resetMotion(ctx);selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);return ScreenId::Browser;}if(choice==4){ctx.browser.goForward();resetMotion(ctx);selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);return ScreenId::Browser;}if(choice==5){
         if(selectedLink<0){ctx.ui.message("Download","Select a page link first");ctx.ui.softkeys("","","Back");return ScreenId::Browser;}

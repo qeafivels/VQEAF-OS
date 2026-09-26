@@ -21,7 +21,7 @@ checks={
     'prefs.isKey("theme")' in settings,
  "Migration is versioned and does not erase external theme paths":
     'prefs.putUChar("themeRev",4)' in settings and
-    'themeRev<4&&saved==static_cast<uint8_t>(ThemeId::S60Green)' in settings and
+    'themeRev<4&&saved!=static_cast<uint8_t>(ThemeId::External)' in settings and
     'prefs.remove("themeFile")' not in settings[:settings.index('void SettingsStore::save()')],
  "All five themes selectable; reset defaults to Midnight":
     "static constexpr int BUILTIN_COUNT = 5;" in apph and
@@ -36,6 +36,8 @@ checks={
     "textWidth(topTime,UiTypography::MICRO)" in ui and
     "textWidth(label, UiTypography::CAPTION)" in ui and
     "fitTextPixels(ttl, UiTypography::BODY" in ui,
+ "No initial Classic splash and no manual theme resets needed":
+    "ThemeId themeId = ThemeId::ModernDark;" in (r/"src/core/SymbianUI.h").read_text(encoding="utf-8"),
  "Midnight has no wallpaper framebuffer":
     "vector-only atmospheric bands" in ui and
     "static const uint16_t shades[]" in ui,

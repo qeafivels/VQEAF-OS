@@ -16,6 +16,7 @@
 #include "../services/WiFiConnectionService.h"
 #include "../services/BrowserService.h"
 #include "../services/BrowserMotion.h"
+#include "../services/BrowserOverviewDirty.h"
 #include "../services/BrowserThumbnailCache.h"
 #include "../services/ImageViewerService.h"
 #include "../services/ShellService.h"
@@ -288,6 +289,7 @@ public:
 #endif
 private:
   BrowserMotion motion;
+  BrowserOverviewDirty overviewDirty;
   BrowserThumbnailCache thumbs;
   int nextThumb=0;
   uint32_t lastThumbAttempt=0;
@@ -301,7 +303,7 @@ private:
   PopupState popup;
   void loadHome(AppContext &ctx);
   void redrawBody(AppContext &ctx);
-  void redrawOverview(AppContext &ctx);
+  void redrawOverview(AppContext &ctx, bool forceFull=true);
   void resetMotion(AppContext &ctx);
   void moveLink(AppContext &ctx, int direction);
 };

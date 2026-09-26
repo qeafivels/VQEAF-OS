@@ -135,12 +135,12 @@ uint32_t BrowserThumbnailCache::crc32(const uint8_t *data,size_t len) {
 bool BrowserThumbnailCache::begin(StorageService *storage) {
   fallbackStorage=storage;
   if(initialized)return true;
-  slots[0].pixels=(uint16_t*)heap_caps_malloc(PIXELS*2,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-  slots[1].pixels=(uint16_t*)heap_caps_malloc(PIXELS*2,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-  if(!slots[0].pixels||!slots[1].pixels){
-    if(slots[0].pixels)free(slots[0].pixels);
-    if(slots[1].pixels)free(slots[1].pixels);
-    slots[0].pixels=slots[1].pixels=nullptr;return false;
+  for(auto &slot:slots) {
+    slot.pixels=(uint16_t*)heap_caps_malloc(PIXELS*2,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!slot.pixels){
+      for(auto &undo:slots){if(undo.pixels)free(undo.pixels);undo.pixels=nullptr;}
+      return false;
+    }
   }
   // Never automatically format an OS data partition to create a cache.
   persistentIsLittleFS=LittleFS.begin(false);
@@ -158,8 +158,10 @@ BrowserThumbnailCache::Tile *BrowserThumbnailCache::find(uint64_t key) {
 }
 BrowserThumbnailCache::Tile *BrowserThumbnailCache::victim() {
   Tile *v=&slots[0];
-  if(!v->valid)return v;
-  if(!slots[1].valid||slots[1].touched<v->touched)v=&slots[1];
+  for(auto &tile:slots){
+    if(!tile.valid)return &tile;
+    if(tile.touched<v->touched)v=&tile;
+  }
   v->valid=false;return v;
 }
 bool BrowserThumbnailCache::loadFlash(uint64_t key,Tile &tile) {

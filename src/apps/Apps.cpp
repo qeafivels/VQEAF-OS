@@ -1886,18 +1886,13 @@ static uint16_t nextLockTimeout(uint16_t current, int direction) {
 static void changeSetting(AppContext &ctx, int index, Key key) {
   SystemSettings &s = ctx.settings.data();
   if (index == 0) {
-    // Theme cycle: Legacy Lime, AMOLED Red, Black and VQEAF Night.
-    if (key == Key::Left) {
-      s.theme = s.theme == ThemeId::External ? ThemeId::S60Green :
-                (s.theme == ThemeId::S60Green ? ThemeId::Classic :
-                (s.theme == ThemeId::Classic ? ThemeId::Black :
-                (s.theme == ThemeId::Black ? ThemeId::AmoledRed : ThemeId::S60Green)));
-    } else {
-      s.theme = s.theme == ThemeId::External ? ThemeId::S60Green :
-                (s.theme == ThemeId::S60Green ? ThemeId::AmoledRed :
-                (s.theme == ThemeId::AmoledRed ? ThemeId::Black :
-                (s.theme == ThemeId::Black ? ThemeId::Classic : ThemeId::S60Green)));
-    }
+    // Stable five-way cycle. External themes enter the Midnight baseline.
+    static const ThemeId kCycle[]={ThemeId::ModernDark,ThemeId::Classic,
+      ThemeId::AmoledRed,ThemeId::Black,ThemeId::S60Green};
+    int pos=0;
+    for(int i=0;i<5;++i)if(s.theme==kCycle[i]){pos=i;break;}
+    pos=(pos+(key==Key::Left?4:1))%5;
+    s.theme=kCycle[pos];
     ctx.settings.selectBuiltInTheme(s.theme);
     ctx.ui.setTheme(s.theme);
     ctx.ui.clear();
@@ -1960,7 +1955,7 @@ ScreenId SettingsApp::handle(AppContext &ctx, const KeyEvent &e) {
         changeSetting(ctx, index, Key::Right);
       } else if (choice == 1) {
         SystemSettings &s = ctx.settings.data();
-        s.theme = ThemeId::S60Green;
+        s.theme = ThemeId::ModernDark;
         s.brightness = 90;
         ctx.settings.selectBuiltInTheme(s.theme);
         ctx.ui.setTheme(s.theme);
@@ -2018,8 +2013,9 @@ ScreenId SettingsApp::handle(AppContext &ctx, const KeyEvent &e) {
 }
 
 // ---------------- Theme manager (read-only VQEAF import) ----------------
-static const ThemeId builtinThemeIds[4] = {
-  ThemeId::Classic, ThemeId::AmoledRed, ThemeId::Black, ThemeId::S60Green
+static const ThemeId builtinThemeIds[5] = {
+  ThemeId::ModernDark, ThemeId::Classic, ThemeId::AmoledRed,
+  ThemeId::Black, ThemeId::S60Green
 };
 static const char *const themeActions[] = {"Apply", "Rescan microSD", "Theme details"};
 static constexpr int THEME_ACTIONS = sizeof(themeActions)/sizeof(themeActions[0]);

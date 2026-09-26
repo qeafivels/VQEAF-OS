@@ -41,3 +41,22 @@ gate("static BrowserService browserService;" in main, "OS should retain one shar
 gate("vqeaf_os" in pio, "OS build profile must remain")
 gate("vqeaf_lua_beta" in pio, "existing Lua beta profile must remain")
 print("PASS Qeafbrowser native integration structural gates")
+
+# Navigation parity gate: Forward mirrors the source browser without
+# sacrificing verified TLS or allocating in the hot input/render loop.
+gate("FORWARD_MAX = 12" in api and "goForward()" in api, "bounded forward stack API missing")
+gate("MALLOC_CAP_SPIRAM" in service and "sizeof(char[192]) * FORWARD_MAX" in service,
+     "forward stack should allocate once and prefer PSRAM")
+back=re.search(r"bool BrowserService::goBack\(\) \{(.*?)\n\}", service, re.S)
+forward=re.search(r"bool BrowserService::goForward\(\) \{(.*?)\n\}", service, re.S)
+gate(back is not None and forward is not None, "Back and Forward implementation missing")
+gate("if (!fetchAndParse(target, false)) return false;" in back.group(1),
+     "Back history must not mutate before successful load")
+gate("for (int i = 0; i < historyUsed - 1;" in back.group(1),
+     "Back must advance history[0] to the displayed URL")
+gate("if (!fetchAndParse(target, false)) return false;" in forward.group(1),
+     "Forward must not mutate its stack on load errors")
+gate("forwardUsed = 0;" in service, "fresh navigation should invalidate forward stack")
+gate('"Back", "Forward", "Download link"' in app and "ctx.browser.goForward()" in app,
+     "Forward option missing in OS UI")
+print("PASS Qeafbrowser Forward navigation structural gates")

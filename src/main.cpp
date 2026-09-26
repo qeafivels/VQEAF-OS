@@ -649,6 +649,13 @@ static void diagCommand(const String &cmd) {
     return;
   }
 #endif
+  if(c=="diag theme status"){
+    const ThemeId chosen=settings.data().theme;
+    Serial.printf("[VQEAF][THEME][STATUS] id=%u name=%s modern_font=%u safe_mode=%u\n",
+      unsigned(chosen),themeName(chosen),unsigned(chosen==ThemeId::ModernDark),
+      unsigned(systemService.safeMode()));
+    return;
+  }
   if(c=="diag app icons"){
     if(!storage.mounted()){
       Serial.println("[VQEAF][QEAPP][ICONS] result=NO_SD");return;
@@ -676,6 +683,7 @@ static void diagCommand(const String &cmd) {
     Serial.println("[S3DIAG] diag sd status | diag sd rw | diag tls valid|expired|wrong|self|host <domain>");
     Serial.println("[S3DIAG] SD removal: stop media, unplug, observe event, reinsert, diag sd rw");
     Serial.println("[S3DIAG] diag app icons - verify installed icon files without displaying private app names");
+    Serial.println("[S3DIAG] diag theme status - report persisted theme and typography mode");
 #if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
     Serial.println("[S3DIAG] diag lua status | diag lua probe (fixed synthetic VM, no files)");
 #endif

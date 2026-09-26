@@ -114,21 +114,21 @@ def main():
             if not gather(12,"[QB][RECOVERY] stage=PASS"):
                 print("INCONCLUSIVE: no staged diagnostic fixture; board may run older firmware")
             else:
-                port.write(b"diag qb reboot\n")
+                port_slot[0].write(b"diag qb reboot\n")
                 if not gather(14,"[QB][RECOVERY] reboot=REQUESTED"):
                     print("INCONCLUSIVE: opt-in reboot not acknowledged")
                 else:
                     # UART CH340 can stop producing bytes during restart.
                     boot=gather(25,"[VQEAF][BUILD]")
-                    port.write(b"diag qb verify\n")
+                    port_slot[0].write(b"diag qb verify\n")
                     verified=gather(12,"[QB][RECOVERY] verify=PASS")
                     print("RECOVERY", "PASS" if verified and boot else "INCONCLUSIVE",
                           "boot_seen=",boot,"verify_pass=",verified)
                     if verified and not args.keep_fixtures:
-                        port.write(b"diag qb cleanup\n")
+                        port_slot[0].write(b"diag qb cleanup\n")
                         gather(5,"[QB][RECOVERY] cleanup=COMPLETE")
         elif args.mode=="verify":
-            port.write(b"diag qb verify\n")
+            port_slot[0].write(b"diag qb verify\n")
             gather(12,"[QB][RECOVERY] verify=")
         if args.seconds>0:
             print("Operate the physical keypad in Browser Overview now, when testing browser FPS.")

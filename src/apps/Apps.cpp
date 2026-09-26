@@ -1590,6 +1590,30 @@ void BrowserApp::diagnosticBenchmark(AppContext &ctx) {
     (unsigned long)rateX10,
     (unsigned long)heap_caps_get_free_size(MALLOC_CAP_8BIT),
     (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+  // Identical synthetic cursor workload in two runs: a full repaint versus
+  // dirty focus tiles. Keep zoom x4 and the 3x3 window stable to isolate
+  // renderer work; use separate metrics so idle/no-change skips are excluded.
+  uint32_t compareFull[32]={},compareDirty[32]={};
+  motion.reset(ctx.browser.lineCount());motion.toggleOverview();
+  for(int z=1;z<4;++z)motion.zoom(1);
+  for(int phase=0;phase<2;++phase) {
+    overviewDirty.invalidate();
+    for(int i=0;i<32;++i) {
+      const int tile=i%4; // Every sample changes actual focus.
+      motion.jumpToLine(tile*6);
+      const uint32_t t=micros();
+      redrawOverview(ctx,phase==0);
+      (phase==0?compareFull:compareDirty)[i]=(uint32_t)(micros()-t);
+      yield();
+    }
+  }
+  uint64_t fullSum=0,dirtySum=0;
+  for(int i=0;i<32;++i){
+    fullSum+=compareFull[i];dirtySum+=compareDirty[i];
+  }
+  Serial.printf("[QB][HW][COMPARE] frames=32 full_avg_us=%lu dirty_avg_us=%lu workload=focus_0_to_3_zoom4 input=synthetic\\n",
+    (unsigned long)(fullSum/32),(unsigned long)(dirtySum/32));
+  overviewDirty.invalidate();
   motion.toggleOverview();
 }
 #endif

@@ -39,6 +39,11 @@ checks={
  "Launcher navigates via two dirty cells and skips same index":
     "ctx.ui.gridItem(old, launcherIcon[old], launcherTitle[old], false);" in launcher and
     "ctx.ui.gridItem(index, launcherIcon[index], launcherTitle[index], true);" in launcher,
+ "Read-only COM3 GPIO diagnostic covers all ten physical buttons":
+    all(x in main for x in ("diag keys","Board::KEY_MENU","Board::KEY_UP","Board::KEY_A",
+       "Board::KEY_LEFT","Board::KEY_START","Board::KEY_RIGHT",
+       "Board::KEY_OPTION","Board::KEY_DOWN","Board::KEY_B","Board::KEY_SELECT")) and
+    "pressed_mask=0x%03X" in main,
  "System honors global key-modal routing, long-press exclusivity":
     "if (osBackConfirm.active())" in main and
     "GlobalShortcutPolicy::resolve(e, keyboard.active())" in main and

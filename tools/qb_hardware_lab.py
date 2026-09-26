@@ -51,6 +51,8 @@ def metrics(lines):
         "browser_animation_fps":summary(values(qb,"anim_fps",True)),
         "browser_perf_windows":len(qb),
         "actual_lcd_overview_render_avg_us":summary(values(hw,"render_avg_us",True)),
+        "comparison_full_repaint_avg_us":summary(values(hw,"full_avg_us",True)),
+        "comparison_dirty_repaint_avg_us":summary(values(hw,"dirty_avg_us",True)),
         "actual_lcd_overview_render_p95_us":summary(values(hw,"render_p95_us",True)),
         "actual_lcd_render_throughput_fps":summary([x/10 for x in values(hw,"throughput_fps_x10",True)]),
         "input_dispatch_avg_us":summary(values(fps,"input_dispatch_avg_us",True)),
@@ -139,7 +141,7 @@ def main():
         if args.bench:
             try:
                 port_slot[0].write(b"diag qb bench\n")
-                gather(24,"[QB][HW]")
+                gather(24,"[QB][HW][COMPARE]")
             except (OSError,serial.SerialException) as err:
                 print("LCD BENCH INCONCLUSIVE:",type(err).__name__)
         if args.seconds>0:

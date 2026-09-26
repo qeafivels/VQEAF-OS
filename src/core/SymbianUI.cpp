@@ -334,7 +334,7 @@ uint16_t SymbianUI::menuRowColor(int row) const {
 }
 
 void SymbianUI::menuBackground() {
-  if (themeId != ThemeId::S60Green && themeId != ThemeId::AmoledRed && themeId != ThemeId::External) {
+  if (themeId != ThemeId::S60Green && themeId != ThemeId::AmoledRed && themeId != ThemeId::External && themeId != ThemeId::ModernDark) {
     clearContent();
     return;
   }
@@ -766,7 +766,7 @@ void SymbianUI::idleHome(bool wifi, bool ble, bool sd, bool hour12, int shortcut
   if (themeId == ThemeId::S60Green) {
     tft.drawFastHLine(0, TITLEBAR_H - 2, Board::SCREEN_W, 0x4BE5);
     tft.drawFastHLine(0, TITLEBAR_H - 1, Board::SCREEN_W, 0xAEE9);
-  } else if (themeId == ThemeId::AmoledRed || themeId == ThemeId::External) {
+  } else if (themeId == ThemeId::AmoledRed || themeId == ThemeId::External || themeId == ThemeId::ModernDark) {
     tft.drawFastHLine(0, TITLEBAR_H - 2, Board::SCREEN_W, colors.border);
     tft.drawFastHLine(0, TITLEBAR_H - 1, Board::SCREEN_W, colors.accent);
   } else {
@@ -781,8 +781,11 @@ void SymbianUI::idleHome(bool wifi, bool ble, bool sd, bool hour12, int shortcut
 
   String topTime = timeText(hour12);
   tft.setTextFont(1);
-  int topTw = tft.textWidth(topTime);
-  tft.setCursor((Board::SCREEN_W - topTw) / 2, 9); tft.print(topTime);
+  int topTw = textWidth(topTime,UiTypography::MICRO);
+  if(themeId==ThemeId::ModernDark)
+    UiVietnameseFont::draw(tft,(Board::SCREEN_W-topTw)/2,8,topTime.c_str(),
+                           colors.chromeText,colors.chrome,0,STATUS_ZONE_W);
+  else {tft.setCursor((Board::SCREEN_W-topTw)/2,9);tft.print(topTime);}
 
   (void)ble; (void)sd;
   const int batteryX = Board::SCREEN_W - STATUS_RIGHT_PAD - STATUS_ICON_W;
@@ -801,29 +804,32 @@ void SymbianUI::idleHome(bool wifi, bool ble, bool sd, bool hour12, int shortcut
   }
 
   // Clock card has a stable background so only this small area is touched each second.
-  const uint16_t standbyPanel = themeId == ThemeId::S60Green ? 0xDF93 : ((themeId == ThemeId::AmoledRed || themeId == ThemeId::External) ? colors.panel : 0x1082);
+  const uint16_t standbyPanel = themeId == ThemeId::S60Green ? 0xDF93 : ((themeId == ThemeId::AmoledRed || themeId == ThemeId::External || themeId==ThemeId::ModernDark) ? colors.panel : 0x1082);
   tft.fillRect(12, 43, Board::SCREEN_W - 24, 78, standbyPanel);
-  tft.drawRect(12, 43, Board::SCREEN_W - 24, 78, themeId == ThemeId::S60Green ? TFT_WHITE : (themeId == ThemeId::AmoledRed ? colors.border : 0x39E7));
+  tft.drawRect(12, 43, Board::SCREEN_W - 24, 78, themeId == ThemeId::S60Green ? TFT_WHITE : ((themeId == ThemeId::AmoledRed || themeId==ThemeId::ModernDark) ? colors.border : 0x39E7));
   idleClock(hour12);
 
   // Compact device status, deliberately one-line-per-service like S60 Active Standby.
-  const uint16_t statusPanel = themeId == ThemeId::S60Green ? 0xB6EE : ((themeId == ThemeId::AmoledRed || themeId == ThemeId::External) ? colors.panel : 0x18C3);
+  const uint16_t statusPanel = themeId == ThemeId::S60Green ? 0xB6EE : ((themeId == ThemeId::AmoledRed || themeId == ThemeId::External || themeId==ThemeId::ModernDark) ? colors.panel : 0x18C3);
   tft.fillRect(12, 132, Board::SCREEN_W - 24, 46, statusPanel);
   tft.setTextFont(1);
   tft.setTextSize(1);
-  tft.setTextColor(themeId == ThemeId::S60Green ? TFT_BLACK : ((themeId == ThemeId::AmoledRed || themeId == ThemeId::External) ? colors.text : 0xE71C), statusPanel);
+  tft.setTextColor(themeId == ThemeId::S60Green ? TFT_BLACK : ((themeId == ThemeId::AmoledRed || themeId == ThemeId::External || themeId==ThemeId::ModernDark) ? colors.text : 0xE71C), statusPanel);
   tft.setCursor(18, 140);
   String firstLine = wifiLine.length() ? wifiLine :
       ((wifi && WiFi.SSID().length()) ? String("WiFi  ") + WiFi.SSID() : "WiFi  offline");
   firstLine = fitTextPixels(firstLine, UiTypography::MICRO, 204);
-  if (UiVietnameseFont::hasUtf8(firstLine.c_str()))
+  if (themeId==ThemeId::ModernDark || UiVietnameseFont::hasUtf8(firstLine.c_str()))
     UiVietnameseFont::draw(tft,18,140,firstLine.c_str(),
       themeId==ThemeId::S60Green?TFT_BLACK:colors.text,statusPanel,0,204);
   else tft.print(firstLine);
   tft.setCursor(18, 154);
-  if (musicPlaying) tft.print("Music playing");
-  else if (unreadNotifications) tft.print(String(unreadNotifications) + " unread notification(s)");
-  else tft.print("Device ready");
+  String secondLine=musicPlaying?"Music playing":
+    (unreadNotifications?String(unreadNotifications)+" unread notification(s)":"Device ready");
+  if(themeId==ThemeId::ModernDark){
+    secondLine=fitTextPixels(secondLine,UiTypography::MICRO,204);
+    UiVietnameseFont::draw(tft,18,154,secondLine.c_str(),colors.dim,statusPanel,0,204);
+  }else tft.print(secondLine);
 
   idleShortcuts(shortcutIndex);
   softkeys("Menu", "Open", "Quick");
@@ -834,9 +840,9 @@ void SymbianUI::idleNetworkStatus(const String &line, bool connected) {
   // Only the status line and its compact WiFi/battery glyph group are dirty.
   // Never redraw the wallpaper, launcher, clock card or softkeys for RF events.
   const uint16_t panel = themeId == ThemeId::S60Green ? 0xB6EE :
-                         ((themeId == ThemeId::AmoledRed || themeId == ThemeId::External) ? colors.panel : 0x18C3);
+                         ((themeId == ThemeId::AmoledRed || themeId == ThemeId::External || themeId==ThemeId::ModernDark) ? colors.panel : 0x18C3);
   const uint16_t ink = themeId == ThemeId::S60Green ? TFT_BLACK :
-                       ((themeId == ThemeId::AmoledRed || themeId == ThemeId::External) ? colors.text : 0xE71C);
+                       ((themeId == ThemeId::AmoledRed || themeId == ThemeId::External || themeId==ThemeId::ModernDark) ? colors.text : 0xE71C);
   tft.fillRect(18, 137, 205, 15, panel);
   tft.setTextFont(1);
   tft.setTextSize(1);
@@ -844,7 +850,7 @@ void SymbianUI::idleNetworkStatus(const String &line, bool connected) {
   String clipped = line;
   clipped = fitTextPixels(clipped, UiTypography::MICRO, 204);
   tft.setCursor(18, 140);
-  if (UiVietnameseFont::hasUtf8(clipped.c_str()))
+  if (themeId==ThemeId::ModernDark || UiVietnameseFont::hasUtf8(clipped.c_str()))
     UiVietnameseFont::draw(tft,18,140,clipped.c_str(),ink,panel,0,204);
   else tft.print(clipped);
 
@@ -859,21 +865,33 @@ void SymbianUI::idleNetworkStatus(const String &line, bool connected) {
 
 
 void SymbianUI::idleClock(bool hour12) {
-  const uint16_t panel = themeId == ThemeId::S60Green ? 0xDF93 : ((themeId == ThemeId::AmoledRed || themeId == ThemeId::External) ? colors.panel : 0x1082);
+  const uint16_t panel = themeId == ThemeId::S60Green ? 0xDF93 : ((themeId == ThemeId::AmoledRed || themeId == ThemeId::External || themeId==ThemeId::ModernDark) ? colors.panel : 0x1082);
   tft.fillRect(18, 50, Board::SCREEN_W - 36, 63, panel);
   String tm = timeText(hour12);
   tft.setTextFont(2);
   tft.setTextSize(2);
   tft.setTextColor(themeId == ThemeId::S60Green ? TFT_BLACK : colors.text, panel);
-  int tw = tft.textWidth(tm);
-  tft.setCursor((Board::SCREEN_W - tw) / 2, 53);
-  tft.print(tm);
-  tft.setTextSize(1);
-  String dt = dateText();
-  tft.setTextFont(2);
-  int dw = tft.textWidth(dt);
-  tft.setCursor((Board::SCREEN_W - dw) / 2, 91);
-  tft.print(dt);
+  if(themeId==ThemeId::ModernDark){
+    // 18px DejaVu bold, custom raster; enlarge the time by a second
+    // baseline stroke instead of changing the stable 78px clock card.
+    tft.setTextSize(1);
+    int tw=textWidth(tm,UiTypography::TITLE);
+    const int x=(Board::SCREEN_W-tw)/2;
+    UiVietnameseFont::draw(tft,x,58,tm.c_str(),colors.text,panel,1,216);
+    String dt=dateText();
+    int dw=textWidth(dt,UiTypography::MICRO);
+    UiVietnameseFont::draw(tft,(Board::SCREEN_W-dw)/2,91,dt.c_str(),colors.dim,panel,0,204);
+  }else{
+    int tw = tft.textWidth(tm);
+    tft.setCursor((Board::SCREEN_W - tw) / 2, 53);
+    tft.print(tm);
+    tft.setTextSize(1);
+    String dt = dateText();
+    tft.setTextFont(2);
+    int dw = tft.textWidth(dt);
+    tft.setCursor((Board::SCREEN_W - dw) / 2, 91);
+    tft.print(dt);
+  }
   tft.setTextFont(1);
 }
 
@@ -903,12 +921,15 @@ void SymbianUI::idleShortcuts(int shortcutIndex) {
   for(int i=0;i<3;++i)idleShortcutTile(i,i==shortcutIndex);
   const VqeafLayout::Rect h=VqeafLayout::HOME_HINT;
   const uint16_t hintBg=themeId==ThemeId::S60Green?0x4BE5:
-    (themeId==ThemeId::External?colors.chrome:0x1082);
+    ((themeId==ThemeId::External||themeId==ThemeId::ModernDark)?colors.chrome:0x1082);
   tft.fillRect(h.x,h.y,h.w,h.h,hintBg);
   tft.setTextFont(UiTypography::MICRO);
   tft.setTextColor(themeId==ThemeId::S60Green?TFT_WHITE:colors.chromeText,hintBg);
   tft.setCursor(h.x+5,UiTypography::HOME_HINT_Y);
-  tft.print("Hold MENU: tasks  OPT: settings");
+  if(themeId==ThemeId::ModernDark){
+    UiVietnameseFont::draw(tft,h.x+5,UiTypography::HOME_HINT_Y,
+      "MENU: tasks   OPT: settings",colors.dim,hintBg,0,h.w-10);
+  }else tft.print("Hold MENU: tasks  OPT: settings");
 }
 void SymbianUI::idleShortcutDelta(int previous, int next) {
   if(previous==next)return;

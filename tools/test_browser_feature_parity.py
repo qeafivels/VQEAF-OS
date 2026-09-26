@@ -39,7 +39,7 @@ gate("MALLOC_CAP_SPIRAM" in thumb and "LittleFS.begin(false)" in thumb and
 gate("TrustedTls::configure" in thumb and
      "strncmp(url,\"https://\",8)" in thumb and
      "if(!strncmp(redirected,\"https://\",8))" not in thumb and
-     "&& !strncmp(redirected,\"https://\",8)" in thumb and
+     "&&!strncmp(redirected,\"https://\",8)" in thumb and
      "setInsecure" not in thumb,
      "verified thumbnail HTTPS with downgrade protection")
 gate("const char *wantedHeaders[]" in svc and

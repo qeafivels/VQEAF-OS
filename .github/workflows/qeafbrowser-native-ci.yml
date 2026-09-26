@@ -9,6 +9,8 @@ on:
       - 'tools/test_qeafbrowser_os.py'
       - 'tools/browser_parity_host.cpp'
       - 'tools/test_browser_feature_parity.py'
+      - 'tools/test_browser_recovery_probe.py'
+      - 'tools/qb_hardware_lab.py'
       - 'tools/test_lua_frame_present.py'
       - 'tools/test_lua_transition_noblank.py'
       - '.github/workflows/qeafbrowser-native-ci.yml'
@@ -32,14 +34,17 @@ jobs:
           g++ -std=c++11 -O2 -Wall -Wextra -Werror tools/browser_parity_host.cpp -o /tmp/qb-parity-host
           /tmp/qb-parity-host
           python tools/test_browser_feature_parity.py
+          python tools/test_browser_recovery_probe.py
       - name: Regression for Back, URL, signature and previous no-blank Lua patch
         run: |
           python tools/test_lua_transition_noblank.py
           python tools/test_lua_frame_present.py
           python tools/test_backguard_v251.py
           python tools/test_v15_signature.py
-      - name: Build stock ESP32-S3 N16R8 firmware
-        run: pio run -e vqeaf_os
+      - name: Build stock and diagnostic ESP32-S3 N16R8 firmware
+        run: |
+          pio run -e vqeaf_os
+          pio run -e vqeaf_perf_diag
       - name: Fetch official verified Lua 5.4.8 and run VM regression
         run: |
           python tools/bootstrap_lua.py --firmware-root .

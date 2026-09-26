@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include "StorageService.h"
+#include "BrowserCookieJar.h"
 
 struct BrowserLine {
   char text[58];
@@ -69,6 +70,7 @@ private:
   char (*forward)[192] = nullptr;
   int forwardUsed = 0;
   char (*bookmarks)[192] = nullptr;
+  BrowserCookieJar *cookieJar = nullptr;
   int bookmarkUsed = 0;
   bool poolsReady = false;
   StorageService *storage = nullptr;
@@ -86,6 +88,8 @@ private:
   bool fetchAndParse(const char *url, bool pushHistory);
   bool renderInternal(const char *url, bool addHistory);
   void loadBookmarks();
+  void loadCookies();
+  bool saveCookies();
   bool saveBookmarks();
   void resetPage();
   void parseHtml(const char *src, size_t len);

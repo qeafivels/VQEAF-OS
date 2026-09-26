@@ -1544,7 +1544,7 @@ void BrowserApp::tick(AppContext &ctx,bool visible) {
   if(elapsed>=5000UL) {
     Serial.printf("[QB][PERF] anim_fps=%lu heap8=%lu psram=%lu thumb_ram=%d thumb_fs=%d thumb_fail=%d\\n",
       (unsigned long)(motionFrames*1000UL/elapsed),
-      (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+      (unsigned long)heap_caps_get_free_size(MALLOC_CAP_8BIT),
       (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
       thumbs.ramHits(),thumbs.flashHits(),thumbs.failedRequests());
     motionFrames=0;lastMetrics=now;

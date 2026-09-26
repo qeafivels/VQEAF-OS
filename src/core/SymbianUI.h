@@ -74,10 +74,10 @@ public:
 
 private:
   TFT_eSPI &tft;
-  ThemeId themeId = ThemeId::Classic;
+  ThemeId themeId = ThemeId::ModernDark;
   uint16_t selectedInk = 0xFFFF;  // launcher.selectedFg for highlighted list/grid labels
-  ThemeColors colors = themeFor(ThemeId::Classic);
-  LauncherStyle launcherSkin = LauncherStyle::fromPalette(themeFor(ThemeId::Classic));
+  ThemeColors colors = themeFor(ThemeId::ModernDark);
+  LauncherStyle launcherSkin = LauncherStyle::fromPalette(themeFor(ThemeId::ModernDark));
 
   bool chromeValid = false;
   bool softkeysValid = false;

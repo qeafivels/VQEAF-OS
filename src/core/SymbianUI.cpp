@@ -1057,7 +1057,8 @@ void SymbianUI::dialog(const String &title, const String &line1, const String &l
   tft.fillRect(x+4,y+4,w,h,0x0000);
   tft.fillRect(x,y,w,h,colors.popup);
   tft.drawRect(x,y,w,h,colors.border);
-  tft.drawRect(x+1,y+1,w-2,h-2,0x8C51);
+  tft.drawRect(x+1,y+1,w-2,h-2,
+    themeId==ThemeId::ModernDark?colors.border:0x8C51);
   tft.fillRect(x+3,y+3,w-6,27,colors.chrome);
   tft.setTextFont(2); tft.setTextColor(colors.chromeText,colors.chrome);
   textBold(x+9,y+7,title,2,colors.chromeText,colors.chrome,true);
@@ -1076,8 +1077,11 @@ void SymbianUI::dialog(const String &title, const String &line1, const String &l
   const int by=y+h-33, bw=(w-26)/2;
   uint16_t lbg=selected==0?colors.popupSelected:colors.popup;
   uint16_t rbg=selected==1?colors.popupSelected:colors.popup;
-  tft.fillRect(x+8,by,bw,24,lbg); tft.drawRect(x+8,by,bw,24,colors.border);
-  tft.fillRect(x+18+bw,by,bw,24,rbg); tft.drawRect(x+18+bw,by,bw,24,colors.border);
+  const uint16_t activeBorder=themeId==ThemeId::ModernDark?colors.accent:colors.border;
+  tft.fillRect(x+8,by,bw,24,lbg);
+  tft.drawRect(x+8,by,bw,24,selected==0?activeBorder:colors.border);
+  tft.fillRect(x+18+bw,by,bw,24,rbg);
+  tft.drawRect(x+18+bw,by,bw,24,selected==1?activeBorder:colors.border);
   tft.setTextFont(1);
   tft.setTextColor(selected==0?(themeId==ThemeId::External?selectedInk:TFT_WHITE):colors.popupText,lbg);
   int lw=textWidth(left,UiTypography::MICRO);

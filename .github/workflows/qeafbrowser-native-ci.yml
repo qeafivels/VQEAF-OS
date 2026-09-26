@@ -10,6 +10,8 @@ on:
       - 'tools/browser_parity_host.cpp'
       - 'tools/test_browser_feature_parity.py'
       - 'tools/test_browser_recovery_probe.py'
+      - 'tools/test_browser_recovery_host.py'
+      - 'tools/browser_recovery_host.cpp'
       - 'tools/qb_hardware_lab.py'
       - 'tools/test_lua_frame_present.py'
       - 'tools/test_lua_transition_noblank.py'
@@ -35,6 +37,7 @@ jobs:
           /tmp/qb-parity-host
           python tools/test_browser_feature_parity.py
           python tools/test_browser_recovery_probe.py
+          python tools/test_browser_recovery_host.py
       - name: Regression for Back, URL, signature and previous no-blank Lua patch
         run: |
           python tools/test_lua_transition_noblank.py

@@ -9,6 +9,13 @@ struct BrowserLine {
   BrowserLine() : text{0}, link(-1) {}
 };
 
+struct BrowserImage {
+  char url[192];
+  char alt[64];
+  int16_t line;
+  BrowserImage() : url{0}, alt{0}, line(-1) {}
+};
+
 struct BrowserLink {
   char url[192];
   char label[48];
@@ -28,6 +35,7 @@ public:
   BrowserService &operator=(const BrowserService &) = delete;
   static constexpr int MAX_LINES = 84;
   static constexpr int MAX_LINKS = 24;
+  static constexpr int MAX_IMAGES = 8;
   static constexpr int HISTORY_MAX = 16;
   static constexpr int FORWARD_MAX = 12;
   static constexpr int BOOKMARK_MAX = 12;
@@ -56,6 +64,8 @@ public:
   int lineCount() const { return lineUsed; }
   const BrowserLine &lineAt(int i) const { return lines[constrain(i, 0, max(0, lineUsed - 1))]; }
   int linkCount() const { return linkUsed; }
+  int imageCount() const {return imageUsed;}
+  const BrowserImage &imageAt(int i) const {return images[constrain(i,0,max(0,imageUsed-1))];}
   const BrowserLink &linkAt(int i) const { return links[constrain(i, 0, max(0, linkUsed - 1))]; }
 
   static bool normalizeUrl(const String &input, char *out, size_t cap);
@@ -66,6 +76,8 @@ private:
   // browser does not permanently consume ~12 KB of scarce internal DRAM/BSS.
   BrowserLine *lines = nullptr;
   BrowserLink *links = nullptr;
+  BrowserImage *images = nullptr;
+  int imageUsed = 0;
   char (*history)[192] = nullptr;
   char (*forward)[192] = nullptr;
   int forwardUsed = 0;

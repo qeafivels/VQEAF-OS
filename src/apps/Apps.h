@@ -367,6 +367,9 @@ class AppInstallerApp {
 public:
   void enter(AppContext &ctx, ScreenId from);
   void draw(AppContext &ctx);
+  // Verify at most one signed Inbox icon per tick, then repaint its row.
+  // Avoid repeated ECDSA checks or blocking six-row redraws on microSD.
+  void tick(AppContext &ctx, bool visible);
   ScreenId handle(AppContext &ctx, const KeyEvent &e);
 private:
   static constexpr int MAX_PACKAGES = 12;
@@ -390,6 +393,12 @@ private:
   // A single icon preview; cache between partial UI redraws rather than
   // repeatedly hashing the package whenever a softkey is pressed.
   bool previewIconReady = false;
+  // Six visible 32x32 RGB565 previews (12 KiB) are allocated in PSRAM,
+  // never on the limited Arduino loop stack. Revalidated on each reload.
+  uint16_t *inboxIcons = nullptr;
+  int iconCacheIndex[SymbianUI::LIST_VISIBLE] = {};
+  uint8_t iconCacheState[SymbianUI::LIST_VISIBLE] = {}; // 0=pending,1=verified icon,2=generic
+  uint32_t lastIconCheckAt = 0;
   bool resultCanOpen = false;
   char resultAppId[25] = {};
   void reload(AppContext &ctx, bool forceCatalogRefresh = true);

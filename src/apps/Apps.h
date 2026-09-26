@@ -283,6 +283,9 @@ public:
   void draw(AppContext &ctx);
   ScreenId handle(AppContext &ctx, const KeyEvent &e);
   void tick(AppContext &ctx, bool visible);
+#if defined(VQEAF_PERF_DIAG)
+  void diagnosticBenchmark(AppContext &ctx);
+#endif
 private:
   BrowserMotion motion;
   BrowserThumbnailCache thumbs;

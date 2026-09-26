@@ -100,6 +100,7 @@ void SymbianUI::setTheme(ThemeId id) {
 }
 
 void SymbianUI::invalidateChrome() {
+  popupCacheValid = false;
   chromeValid = false;
   softkeysValid = false;
   chromeTitle[0] = 0;
@@ -114,6 +115,7 @@ void SymbianUI::clear() {
 }
 
 void SymbianUI::clearContent() {
+  popupCacheValid = false;
   tft.fillRect(0, CONTENT_TOP, Board::SCREEN_W, SOFTKEY_TOP - CONTENT_TOP, colors.bg);
 }
 
@@ -281,6 +283,10 @@ void SymbianUI::refreshWifiBadge(bool connected, bool hour12) {
 }
 
 void SymbianUI::softkeys(const String &left, const String &center, const String &right) {
+  // Every ordinary footer draw means the popup may have closed. The
+  // overlay itself always requests Select / empty / Cancel.
+  if (!(left=="Select" && center.length()==0 && right=="Cancel"))
+    popupCacheValid=false;
   if (softkeysValid && left == softLeft && center == softCenter && right == softRight) return;
   const int y = SOFTKEY_TOP;
   const uint16_t bar = themeId == ThemeId::S60Green ? 0xB6EE :
@@ -336,6 +342,7 @@ uint16_t SymbianUI::menuRowColor(int row) const {
 }
 
 void SymbianUI::menuBackground() {
+  popupCacheValid = false;
   if (themeId != ThemeId::S60Green && themeId != ThemeId::AmoledRed && themeId != ThemeId::External && themeId != ThemeId::ModernDark) {
     clearContent();
     return;
@@ -652,17 +659,28 @@ void SymbianUI::popupMenu(const char *const items[], int count, int selected, in
   const int x = 5;
   const int y = SOFTKEY_TOP - h - 2;
 
-  tft.fillRect(x + 4, y + 4, w, h, 0x0000);
-  tft.fillRect(x, y, w, h, colors.popup);
-  tft.drawRect(x, y, w, h, colors.border);
-  tft.drawRect(x + 1, y + 1, w - 2, h - 2,
-    themeId==ThemeId::ModernDark ? colors.border : 0x8C51);
-
+  // Key repeat or D-pad focus changes in the same viewport need only the
+  // previous and newly focused rows; do not erase/repaint the whole overlay.
+  const bool samePopup=popupCacheValid && popupCacheItems==items &&
+      popupCacheCount==count && popupCacheVisible==visible &&
+      popupCacheOffset==offset;
+  const int previous=popupCacheSelected;
+  if (samePopup && previous==selected) return;
+  popupCacheValid=true;popupCacheItems=items;popupCacheCount=count;
+  popupCacheVisible=visible;popupCacheOffset=offset;popupCacheSelected=selected;
+  if(!samePopup){
+    tft.fillRect(x + 4, y + 4, w, h, 0x0000);
+    tft.fillRect(x, y, w, h, colors.popup);
+    tft.drawRect(x, y, w, h, colors.border);
+    tft.drawRect(x + 1, y + 1, w - 2, h - 2,
+      themeId==ThemeId::ModernDark ? colors.border : 0x8C51);
+  }
   tft.setTextFont(2);
   tft.setTextSize(1);
   for (int row = 0; row < visible; ++row) {
     int i = offset + row;
     if (i >= count) break;
+    if(samePopup && i!=previous && i!=selected)continue;
     int iy = y + 3 + row * rowH;
     uint16_t bg = (i == selected) ? colors.popupSelected : colors.popup;
     uint16_t fg = (i == selected) ?
@@ -677,7 +695,9 @@ void SymbianUI::popupMenu(const char *const items[], int count, int selected, in
   }
   tft.setTextFont(1);
 
-  if (count > visible) {
+  // Scrolling changes offset and needs a full draw; focus-only changes
+  // leave the scrollbar pixel-perfect and avoid a second SPI transaction.
+  if (!samePopup && count > visible) {
     int trackX = x + w - 7;
     int trackY = y + 5;
     int trackH = h - 10;

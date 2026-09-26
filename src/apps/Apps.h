@@ -16,6 +16,7 @@
 #include "../services/WiFiConnectionService.h"
 #include "../services/BrowserService.h"
 #include "../services/BrowserMotion.h"
+#include "../services/BrowserThumbnailCache.h"
 #include "../services/ImageViewerService.h"
 #include "../services/ShellService.h"
 #include "../services/ThemeFileService.h"
@@ -284,6 +285,9 @@ public:
   void tick(AppContext &ctx, bool visible);
 private:
   BrowserMotion motion;
+  BrowserThumbnailCache thumbs;
+  int nextThumb=0;
+  uint32_t lastThumbAttempt=0;
   int offset = 0;
   int selectedLink = -1;
   bool urlEntry = false;

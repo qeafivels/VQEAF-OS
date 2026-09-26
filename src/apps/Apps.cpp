@@ -1462,7 +1462,7 @@ void BrowserApp::redrawBody(AppContext &ctx) {
   ctx.ui.softkeys("Options",selectedLink>=0?"Open":"", "Back");
 }
 
-void BrowserApp::redrawOverview(AppContext &ctx, bool forceFull) {
+bool BrowserApp::redrawOverview(AppContext &ctx, bool forceFull) {
   TFT_eSPI &d=ctx.ui.display();
   const ThemeColors c=ctx.ui.c();
   const int perTile=max(3,25/motion.zoomValue());
@@ -1474,7 +1474,7 @@ void BrowserApp::redrawOverview(AppContext &ctx, bool forceFull) {
     (motion.targetPixel()*(track-18))/motion.maxScroll():0;
   const auto plan=overviewDirty.update(forceFull,firstTile,motion.zoomValue(),
                                         selected,progress);
-  if(plan.kind==BrowserOverviewDirty::Kind::None)return;
+  if(plan.kind==BrowserOverviewDirty::Kind::None)return false;
   constexpr int tileW=64,tileH=58;
   auto paintTile=[&](int i){
     const int tileIndex=firstTile+i;
@@ -1546,6 +1546,7 @@ void BrowserApp::redrawOverview(AppContext &ctx, bool forceFull) {
     if(forceFull || plan.kind==BrowserOverviewDirty::Kind::Full)
       ctx.ui.softkeys("Options","Select","Back");
   }
+  return true;
 }
 
 #if defined(VQEAF_PERF_DIAG)
@@ -1626,9 +1627,12 @@ void BrowserApp::tick(AppContext &ctx,bool visible) {
   if((uint32_t)(now-lastMotionPaint)>=33UL) {
     lastMotionPaint=now;
     if(motion.tick(now)) {
-      if(motion.overview())redrawOverview(ctx,false);
-      else redrawBody(ctx);
-      ++motionFrames;
+      if(motion.overview()) {
+        if(redrawOverview(ctx,false))++motionFrames;
+      } else {
+        redrawBody(ctx);
+        ++motionFrames;
+      }
     }
   }
 #if defined(VQEAF_PERF_DIAG)

@@ -10,6 +10,7 @@ on:
       - 'tools/browser_parity_host.cpp'
       - 'tools/browser_overview_dirty_host.cpp'
       - 'tools/test_browser_overview_integration.py'
+      - 'tools/test_lua_qeapp_uart.py'
       - 'tools/test_browser_feature_parity.py'
       - 'tools/test_browser_recovery_probe.py'
       - 'tools/test_browser_recovery_host.py'
@@ -40,6 +41,7 @@ jobs:
           g++ -std=c++11 -O2 -Wall -Wextra -Werror tools/browser_overview_dirty_host.cpp -o /tmp/qb-dirty-host
           /tmp/qb-dirty-host
           python tools/test_browser_overview_integration.py
+          python tools/test_lua_qeapp_uart.py
           python tools/test_browser_feature_parity.py
           python tools/test_browser_recovery_probe.py
           python tools/test_browser_recovery_host.py
@@ -61,7 +63,9 @@ jobs:
       - name: Provision throwaway beta key for CI only
         run: python tools/provision_lua_beta_key.py --private "${{ runner.temp }}/qeapp-browser-ci-ephemeral.pem"
       - name: Build experimental Lua beta firmware (do not flash CI key)
-        run: pio run -e vqeaf_lua_beta
+        run: |
+          pio run -e vqeaf_lua_beta
+          pio run -e vqeaf_lua_uart
       - name: Upload CI-only build artifacts
         if: always()
         uses: actions/upload-artifact@v4

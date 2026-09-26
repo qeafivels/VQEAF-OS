@@ -11,6 +11,7 @@ ui=(r/"src/core/SymbianUI.cpp").read_text(encoding="utf-8")
 uih=(r/"src/core/SymbianUI.h").read_text(encoding="utf-8")
 main=(r/"src/main.cpp").read_text(encoding="utf-8")
 input_src=(r/"src/core/InputManager.cpp").read_text(encoding="utf-8")
+launcher=(r/"src/apps/LauncherGrid.cpp").read_text(encoding="utf-8")
 a=apps[apps.index("bool ThemesApp::apply("):apps.index("void ThemesApp::draw(")]
 p=ui[ui.index("void SymbianUI::popupMenu("):ui.index("void SymbianUI::message(")]
 checks={
@@ -36,8 +37,8 @@ checks={
     "popupCacheSelected = -1;" in uih and
     "popupCacheItems = nullptr;" in uih,
  "Launcher navigates via two dirty cells and skips same index":
-    "ctx.ui.gridItem(old, launcherIcon[old], launcherTitle[old], false);" in apps and
-    "ctx.ui.gridItem(index, launcherIcon[index], launcherTitle[index], true);" in apps,
+    "ctx.ui.gridItem(old, launcherIcon[old], launcherTitle[old], false);" in launcher and
+    "ctx.ui.gridItem(index, launcherIcon[index], launcherTitle[index], true);" in launcher,
  "System honors global key-modal routing, long-press exclusivity":
     "if (osBackConfirm.active())" in main and
     "GlobalShortcutPolicy::resolve(e, keyboard.active())" in main and

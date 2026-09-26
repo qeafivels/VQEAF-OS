@@ -4,7 +4,7 @@
 #include "../core/Theme.h"
 
 struct SystemSettings {
-  ThemeId theme = ThemeId::S60Green;
+  ThemeId theme = ThemeId::ModernDark;
   uint8_t brightness = 90;
   uint8_t volume = 80;
   bool hour12 = false;

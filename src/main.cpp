@@ -44,6 +44,7 @@
 #include "services/QeappDataService.h"
 #include "apps/Apps.h"
 #include "apps/PixelSnakeApp.h"
+#include "apps/SketchpadApp.h"
 
 #if defined(VQEAF_ENABLE_LUA) && VQEAF_ENABLE_LUA
 #include "lua/QeLuaRuntime.h"
@@ -165,6 +166,7 @@ static QuickPanelApp quickPanelApp;
 static TaskSwitcherApp taskSwitcherApp;
 static NotificationCenterApp notificationApp;
 static NotesApp notesApp;
+static SketchpadApp sketchpadApp;
 static PixelSnakeApp pixelSnakeApp;
 
 static ScreenId screen = ScreenId::Splash;
@@ -490,6 +492,8 @@ static void enterScreen(ScreenId s, bool animate = true, bool resume = false) {
       if (!resume) notificationApp.enter(appCtx, from); notificationApp.draw(appCtx); break;
     case ScreenId::Notes:
       if (!resume) notesApp.enter(); notesApp.draw(appCtx); break;
+    case ScreenId::Sketchpad:
+      if (!resume) sketchpadApp.enter(); sketchpadApp.draw(appCtx); break;
     case ScreenId::Recovery:
       if (!resume) recoveryApp.enter(); recoveryApp.draw(appCtx); break;
     case ScreenId::Lock:
@@ -858,6 +862,10 @@ static void reportUiPerformanceIfDue() {
      (unsigned long)heap_caps_get_free_size(MALLOC_CAP_8BIT),
      (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
      (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+  // Actual CPU frequency is sampled on the MCU, not inferred from host FPS.
+  // 240 MHz is only the configured target and does not prove no throttling.
+  Serial.printf("[VQEAF][CLOCK] target_mhz=240 observed_mhz=%lu uptime_ms=%lu\n",
+                (unsigned long)getCpuFrequencyMhz(),(unsigned long)now);
 }
 #endif
 
@@ -1145,6 +1153,8 @@ void loop() {
       next = notificationApp.handle(appCtx,e); break;
     case ScreenId::Notes:
       next = notesApp.handle(appCtx,e); break;
+    case ScreenId::Sketchpad:
+      next = sketchpadApp.handle(appCtx,e); break;
     case ScreenId::Recovery:
       next = recoveryApp.handle(appCtx,e); break;
     case ScreenId::Clock:

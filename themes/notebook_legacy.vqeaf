@@ -1,0 +1,39 @@
+@vqeaf 1.0
+<theme id="notebook_legacy" name="Notebook Blue">
+    metadata {
+        author: "VQEAF-OS contributors"
+        version: "1.0.0"
+        description: "Original notebook-inspired palette; no third-party artwork"
+    }
+    studio { orientation: "portrait" targetWidth: 240 targetHeight: 320 }
+    palette {
+        shellTop: "#244F88"
+        shellBottom: "#F3EBD9"
+        shellBorder: "#B8AA92"
+        screen: "#FCF6E8"
+        key: "#EEE5D2"
+        keyPressed: "#CFDDEF"
+        keyBorder: "#B0A38C"
+        keyText: "#143B74"
+        subText: "#55677B"
+        accent: "#B93D3D"
+        glow: "#5682BD"
+    }
+    launcher {
+        background: "#FCF6E8"
+        foreground: "#173B6B"
+        headerBg: "#254D86"
+        headerFg: "#FFFFFF"
+        tabAccent: "#B93D3D"
+        listBg: "#FCF6E8"
+        listFg: "#173B6B"
+        selectedBg: "#D4E2F1"
+        selectedFg: "#12345F"
+        previewBg: "#EEE5D2"
+        previewFg: "#173B6B"
+        scrollbar: "#B93D3D"
+        footerBg: "#254D86"
+        footerFg: "#FFFFFF"
+        border: "#998A70"
+    }
+</theme>

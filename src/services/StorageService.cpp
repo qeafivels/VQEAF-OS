@@ -81,6 +81,7 @@ bool StorageService::ensureSystemLayout() {
     StoragePaths::THEMES, StoragePaths::APPS, StoragePaths::APPS_INSTALLED, StoragePaths::APPS_INBOX, StoragePaths::APPS_DATA,
     StoragePaths::DOWNLOADS, StoragePaths::LOGS, StoragePaths::TEMP,
     StoragePaths::MEDIA, StoragePaths::MUSIC, StoragePaths::PICTURES, StoragePaths::DOCUMENTS,
+    StoragePaths::SKETCHPAD, StoragePaths::SKETCHPAD_LEGACY,
     "/Themes" // legacy compatibility with v1.2 theme cards
   };
   bool all = true;

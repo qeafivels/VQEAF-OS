@@ -126,15 +126,17 @@ void SymbianUI::clearListRow(int row) {
 String SymbianUI::fitTextPixels(const String &label,uint8_t font,int maxPx) {
   if(maxPx<=0)return String();
   if(textWidth(label,font)<=maxPx)return label;
+  const String marker=themeId==ThemeId::ModernDark ? "..." : "~";
+  if(textWidth(marker,font)>maxPx)return String();
   String cut=label;
-  while(cut.length() && textWidth(cut+"~",font)>maxPx) {
+  while(cut.length() && textWidth(cut+marker,font)>maxPx) {
     // Remove the entire final UTF-8 codepoint, not merely its trailing byte.
     // NFC input is required by the tiny bitmap font; malformed input is '?' in draw.
     size_t first=cut.length()-1;
     while(first>0 && (((uint8_t)cut[first]&0xC0)==0x80))--first;
     cut.remove(first);
   }
-  return cut.length()?cut+"~":String();
+  return cut.length()?cut+marker:marker;
 }
 
 String SymbianUI::timeText(bool hour12) {
@@ -546,16 +548,17 @@ void SymbianUI::listItem(int row, const String &icon, const String &title, const
   const int textX = 48;
   String ttl = title;
   ttl = fitTextPixels(ttl, UiTypography::BODY, Board::SCREEN_W - textX - 8);
-  textBold(textX, y + 3, ttl, UiTypography::BODY, labelInk, bg);
+  textBold(textX,y+UiTypography::LIST_TITLE_OFFSET_Y,ttl,UiTypography::BODY,labelInk,bg);
 
   if (sub.length()) {
     tft.setTextFont(1);
     tft.setTextColor(colors.dim, bg);
-    tft.setCursor(textX + 1, y + 24);
+    tft.setCursor(textX+1,y+UiTypography::LIST_DETAIL_OFFSET_Y);
     String line = sub;
     line = fitTextPixels(line, UiTypography::MICRO, Board::SCREEN_W - textX - 8);
     if (themeId==ThemeId::ModernDark || UiVietnameseFont::hasUtf8(line.c_str()))
-      UiVietnameseFont::draw(tft,textX+1,y+24,line.c_str(),colors.dim,bg,0,Board::SCREEN_W-textX-9);
+      UiVietnameseFont::draw(tft,textX+1,y+UiTypography::LIST_DETAIL_OFFSET_Y,
+        line.c_str(),colors.dim,bg,0,Board::SCREEN_W-textX-9);
     else tft.print(line);
   }
   tft.setTextFont(1);
@@ -652,7 +655,8 @@ void SymbianUI::popupMenu(const char *const items[], int count, int selected, in
   tft.fillRect(x + 4, y + 4, w, h, 0x0000);
   tft.fillRect(x, y, w, h, colors.popup);
   tft.drawRect(x, y, w, h, colors.border);
-  tft.drawRect(x + 1, y + 1, w - 2, h - 2, 0x8C51);
+  tft.drawRect(x + 1, y + 1, w - 2, h - 2,
+    themeId==ThemeId::ModernDark ? colors.border : 0x8C51);
 
   tft.setTextFont(2);
   tft.setTextSize(1);
@@ -661,11 +665,15 @@ void SymbianUI::popupMenu(const char *const items[], int count, int selected, in
     if (i >= count) break;
     int iy = y + 3 + row * rowH;
     uint16_t bg = (i == selected) ? colors.popupSelected : colors.popup;
-    uint16_t fg = (i == selected) ? (themeId == ThemeId::External ? selectedInk : TFT_WHITE) : colors.popupText;
+    uint16_t fg = (i == selected) ?
+      (themeId==ThemeId::ModernDark?selectedInk:
+       (themeId==ThemeId::External?selectedInk:TFT_WHITE)) : colors.popupText;
     tft.fillRect(x + 3, iy, w - 13, rowH - 1, bg);
-    if (i == selected) tft.drawRect(x + 3, iy, w - 13, rowH - 1, TFT_WHITE);
-    tft.setTextColor(fg, bg);
-    textBold(x + 10, iy + 6, String(items[i]), 2, fg, bg);
+    if(i==selected)tft.drawRect(x+3,iy,w-13,rowH-1,
+      themeId==ThemeId::ModernDark?colors.accent:TFT_WHITE);
+    tft.setTextColor(fg,bg);
+    const String label=fitTextPixels(String(items[i]),UiTypography::BODY,w-34);
+    textBold(x+10,iy+6,label,UiTypography::BODY,fg,bg);
   }
   tft.setTextFont(1);
 
@@ -673,11 +681,13 @@ void SymbianUI::popupMenu(const char *const items[], int count, int selected, in
     int trackX = x + w - 7;
     int trackY = y + 5;
     int trackH = h - 10;
-    tft.fillRect(trackX, trackY, 3, trackH, 0xBDF7);
+    tft.fillRect(trackX, trackY, 3, trackH,
+      themeId==ThemeId::ModernDark?colors.border:0xBDF7);
     int thumbH = max(10, (trackH * visible) / count);
     int maxOffset = max(1, count - visible);
     int thumbY = trackY + ((trackH - thumbH) * offset) / maxOffset;
-    tft.fillRect(trackX, thumbY, 3, thumbH, 0x2104);
+    tft.fillRect(trackX, thumbY, 3, thumbH,
+      themeId==ThemeId::ModernDark?colors.accent:0x2104);
   }
 }
 

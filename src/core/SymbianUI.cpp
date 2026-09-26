@@ -530,6 +530,7 @@ void SymbianUI::drawIcon(int x, int y, const String &kind, uint16_t color) {
 }
 
 void SymbianUI::listItem(int row, const String &icon, const String &title, const String &sub, bool selected, bool showIcon) {
+  popupCacheValid = false;
   if (row < 0 || row >= LIST_VISIBLE) return;
   const int y = CONTENT_TOP + 1 + row * LIST_ROW_H;
   const uint16_t bg = selected ? colors.selected : colors.bg;
@@ -572,6 +573,7 @@ void SymbianUI::listItem(int row, const String &icon, const String &title, const
 }
 
 void SymbianUI::gridItem(int slot, const String &icon, const String &title, bool selected) {
+  popupCacheValid = false;
   if (slot < 0 || slot >= GRID_COLS * GRID_ROWS) return;
   const int col = slot % GRID_COLS;
   const int row = slot / GRID_COLS;

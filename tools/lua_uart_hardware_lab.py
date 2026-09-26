@@ -47,7 +47,12 @@ def main():
                   "psram_free="+fields.get("psram_free","unknown"),
                   "signed_lua_installed="+fields.get("signed_lua_installed","unknown"),
                   "safe_mode="+fields.get("safe_mode","unknown"),
-                  "sd="+fields.get("sd","unknown"))
+                  "sd="+fields.get("sd","unknown"),
+                  "screen="+fields.get("screen","unknown"),
+                  "crash_streak="+fields.get("crash_streak","unknown"),
+                  "boot_healthy="+fields.get("boot_healthy","unknown"),
+                  "key_a_low="+fields.get("key_a_low","unknown"),
+                  "key_down_low="+fields.get("key_down_low","unknown"))
             if fields.get("vm_running")=="1":
                 print("INCONCLUSIVE A Lua app is running; do not interrupt it")
                 return 3

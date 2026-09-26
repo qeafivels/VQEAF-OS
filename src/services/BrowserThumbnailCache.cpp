@@ -199,6 +199,10 @@ bool BrowserThumbnailCache::has(const char *url) {
   if(!initialized||!url||!url[0])return false;
   const uint64_t key=hashUrl(url);
   if(find(key)){++hitsRam;return true;}
+  // Check existence before evicting a valid PSRAM tile; a missing image
+  // must never flush another site's cached preview on every redraw.
+  fs::FS *fs=persistentFs();
+  if(!fs||!fs->exists(pathFor(key)))return false;
   Tile *slot=victim();
   return loadFlash(key,*slot);
 }

@@ -13,6 +13,7 @@ class BrowserRecoveryProbe {
   static constexpr const char *COOKIE="/System/Temp/qb_recovery_cookie.tmp";
   static constexpr const char *MARKER="/System/Temp/qb_recovery.marker";
   static constexpr const char *THUMB="/qbthumb/qb_recovery_probe.bin";
+  static constexpr const char *SD_THUMB="/System/Cache/Thumbs/qb_recovery_probe.bin";
   static constexpr const char *TEST_URL="https://qb-recovery.invalid/";
   static constexpr size_t TILE_BYTES=BrowserThumbFormat::WIDTH*BrowserThumbFormat::HEIGHT*2;
   static bool readExact(fs::FS &fs,const char *path,uint8_t *buf,size_t n){
@@ -56,11 +57,12 @@ class BrowserRecoveryProbe {
   static void fillTile(uint8_t *payload){
     for(size_t i=0;i<TILE_BYTES;++i)payload[i]=(uint8_t)((i*37U+11U)&0xffU);
   }
-  static bool checkThumb(){
-    if(!LittleFS.begin(false))return false; // Never format flash.
+  static bool checkThumb(StorageService &storage,char tier){
+    if(tier=='F' && !LittleFS.begin(false))return false;
+    if(tier=='D')storage.recoverAtomicFile(SD_THUMB);
     uint8_t *tile=(uint8_t*)heap_caps_malloc(TILE_BYTES,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!tile)return false;
-    File f=LittleFS.open(THUMB,FILE_READ);
+    File f=tier=='F'?LittleFS.open(THUMB,FILE_READ):storage.fs().open(SD_THUMB,FILE_READ);
     BrowserThumbFormat::Header h={};
     bool ok=f&&!f.isDirectory()&&
       f.size()==sizeof(h)+TILE_BYTES&&
@@ -84,7 +86,7 @@ public:
     if(!storage.mounted())return false;
     storage.recoverAtomicFile(MARKER);
     uint8_t flag=0;
-    return readExact(storage.fs(),MARKER,&flag,1) && (flag=='F'||flag=='S');
+    return readExact(storage.fs(),MARKER,&flag,1) && (flag=='F'||flag=='D');
   }
   static void stage(StorageService &storage) {
     if(!storage.mounted()||!storage.ensureDir(StoragePaths::TEMP)){
@@ -127,13 +129,37 @@ public:
         free(tile);
       }
     }
+    // A system with existing SPIFFS or no LittleFS must still persist real
+    // preview tiles through the same bounded SD fallback as BrowserThumbnailCache.
+    bool sdThumb=false;
+    if(!flash&&storage.ensureDir(StoragePaths::CACHE_THUMBS)) {
+      uint8_t *record=(uint8_t*)heap_caps_malloc(TILE_BYTES+sizeof(BrowserThumbFormat::Header),
+                                                   MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+      if(record){
+        uint8_t *pixels=record+sizeof(BrowserThumbFormat::Header);
+        fillTile(pixels);
+        const auto h=BrowserThumbFormat::make(TEST_URL,pixels,TILE_BYTES);
+        memcpy(record,&h,sizeof(h));
+        sdThumb=storage.writeAtomic(SD_THUMB,record,TILE_BYTES+sizeof(h));
+        free(record);
+      }
+    }
     // Commit marker LAST so an interrupted stage cannot fake a completed run.
-    const char marker=flash?'F':'S';
-    bool committed=html&&cookies&&
+    const char marker=flash?'F':'D';
+    bool committed=html&&cookies&&(flash||sdThumb)&&
       storage.writeAtomic(MARKER,(const uint8_t*)&marker,1);
     Serial.printf("[QB][RECOVERY] stage=%s html=%s cookie=%s thumb=%s\n",
        committed?"PASS":"FAIL",html?"PASS":"FAIL",cookies?"PASS":"FAIL",
-       flash?"FLASH_PASS":"FLASH_UNAVAILABLE");
+       flash?"LITTLEFS_PASS":(sdThumb?"SD_FALLBACK_PASS":"FAIL"));
+  }
+  static void cleanup(StorageService &storage){
+    if(!staged(storage)){
+      Serial.println("[QB][RECOVERY] cleanup=BLOCKED reason=NO_STAGED_FIXTURE");return;
+    }
+    storage.remove(HTML);storage.remove(COOKIE);storage.remove(SD_THUMB);
+    if(LittleFS.begin(false))LittleFS.remove(THUMB);
+    storage.remove(MARKER);
+    Serial.println("[QB][RECOVERY] cleanup=COMPLETE");
   }
   static void verify(StorageService &storage){
     if(!storage.mounted()){
@@ -141,17 +167,17 @@ public:
     }
     storage.recoverAtomicFile(MARKER);
     uint8_t flag=0;
-    if(!readExact(storage.fs(),MARKER,&flag,1)||(flag!='F'&&flag!='S')){
+    if(!readExact(storage.fs(),MARKER,&flag,1)||(flag!='F'&&flag!='D')){
       Serial.println("[QB][RECOVERY] verify=INCONCLUSIVE reason=NO_COMMITTED_STAGE");
       return;
     }
     const bool html=checkHtml(storage);
     const bool cookie=checkCookie(storage);
-    const bool thumb=flag=='F'?checkThumb():true;
+    const bool thumb=checkThumb(storage,(char)flag);
     const bool pass=html&&cookie&&thumb;
     Serial.printf("[QB][RECOVERY] verify=%s html=%s cookie=%s thumb=%s boot_uptime_ms=%lu\n",
        pass?"PASS":"FAIL",html?"PASS":"FAIL",cookie?"PASS":"FAIL",
-       flag=='F'?(thumb?"PASS":"FAIL"):"SKIPPED_FLASH_UNAVAILABLE",
+       thumb?(flag=='F'?"LITTLEFS_PASS":"SD_FALLBACK_PASS"):"FAIL",
        (unsigned long)millis());
   }
 };

@@ -1,4 +1,5 @@
 #include "BrowserThumbnailCache.h"
+#include "BrowserThumbFormat.h"
 #include "BrowserService.h"
 #include "StorageService.h"
 #include "TrustedTls.h"
@@ -16,13 +17,8 @@
 namespace {
 constexpr size_t PIXELS=BrowserThumbnailCache::W*BrowserThumbnailCache::H;
 constexpr size_t IMAGE_LIMIT=96*1024;
-constexpr uint32_t MAGIC=0x32425451UL; // QTB2
-struct __attribute__((packed)) DiskHeader {
-  uint32_t magic;
-  uint64_t key;
-  uint32_t crc;
-  uint16_t w,h;
-};
+using BrowserThumbFormat::MAGIC;
+using DiskHeader=BrowserThumbFormat::Header;
 StorageService *fallbackStorage=nullptr;
 static char diskName[64];
 static bool persistentIsLittleFS=false;
@@ -118,19 +114,10 @@ bool decodeImage(const uint8_t *buf,size_t size,uint16_t *output) {
 } // namespace
 
 uint64_t BrowserThumbnailCache::hashUrl(const char *url) {
-  uint64_t hash=14695981039346656037ULL;
-  if(url)for(const uint8_t *p=(const uint8_t*)url;*p;++p){
-    hash^=*p;hash*=1099511628211ULL;
-  }
-  return hash;
+  return BrowserThumbFormat::fingerprint(url);
 }
 uint32_t BrowserThumbnailCache::crc32(const uint8_t *data,size_t len) {
-  uint32_t crc=~0UL;
-  for(size_t i=0;i<len;++i) {
-    crc^=data[i];
-    for(int b=0;b<8;++b)crc=(crc>>1)^((crc&1)?0xEDB88320UL:0);
-  }
-  return ~crc;
+  return BrowserThumbFormat::crc32(data,len);
 }
 bool BrowserThumbnailCache::begin(StorageService *storage) {
   fallbackStorage=storage;

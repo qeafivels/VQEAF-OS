@@ -346,7 +346,7 @@ public:
   void draw(AppContext &ctx);
   ScreenId handle(AppContext &ctx, const KeyEvent &e);
 private:
-  static constexpr int BUILTIN_COUNT = 4;
+  static constexpr int BUILTIN_COUNT = 5;
   int index = 0;
   int offset = 0;
   ScreenId returnTo = ScreenId::Launcher;

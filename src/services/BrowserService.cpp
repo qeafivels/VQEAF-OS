@@ -10,6 +10,7 @@
 
 constexpr int BrowserService::MAX_LINES;
 constexpr int BrowserService::MAX_LINKS;
+constexpr int BrowserService::MAX_IMAGES;
 constexpr int BrowserService::HISTORY_MAX;
 constexpr int BrowserService::FORWARD_MAX;
 
@@ -187,12 +188,13 @@ BrowserService::~BrowserService() {
   // on ESP32. No render work should access these pools after destruction.
   if (lines) free(lines);
   if (links) free(links);
+  if (images) free(images);
   if (history) free(history);
   if (forward) free(forward);
   if (bookmarks) free(bookmarks);
   if (cookieJar) { cookieJar->~BrowserCookieJar(); free(cookieJar); }
   cookieJar=nullptr;
-  lines = nullptr; links = nullptr; history = nullptr; forward = nullptr; bookmarks = nullptr;
+  lines = nullptr; links = nullptr; images = nullptr; history = nullptr; forward = nullptr; bookmarks = nullptr;
   poolsReady = false;
 }
 
@@ -201,6 +203,7 @@ bool BrowserService::begin(StorageService *storageRef) {
   if (!poolsReady) {
     lines = (BrowserLine*)heap_caps_malloc(sizeof(BrowserLine) * MAX_LINES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     links = (BrowserLink*)heap_caps_malloc(sizeof(BrowserLink) * MAX_LINKS, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    images = (BrowserImage*)heap_caps_malloc(sizeof(BrowserImage) * MAX_IMAGES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     history = (char (*)[192])heap_caps_malloc(sizeof(char[192]) * HISTORY_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     forward = (char (*)[192])heap_caps_malloc(sizeof(char[192]) * FORWARD_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     bookmarks = (char (*)[192])heap_caps_malloc(sizeof(char[192]) * BOOKMARK_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -210,23 +213,26 @@ bool BrowserService::begin(StorageService *storageRef) {
     // Safe Mode can still be used if internal memory becomes constrained.
     if (!lines) lines = (BrowserLine*)malloc(sizeof(BrowserLine) * MAX_LINES);
     if (!links) links = (BrowserLink*)malloc(sizeof(BrowserLink) * MAX_LINKS);
+    if (!images) images = (BrowserImage*)malloc(sizeof(BrowserImage) * MAX_IMAGES);
     if (!history) history = (char (*)[192])malloc(sizeof(char[192]) * HISTORY_MAX);
     if (!forward) forward = (char (*)[192])malloc(sizeof(char[192]) * FORWARD_MAX);
     if (!bookmarks) bookmarks = (char (*)[192])malloc(sizeof(char[192]) * BOOKMARK_MAX);
     if (!cookieJar) { void *p=malloc(sizeof(BrowserCookieJar)); if(p)cookieJar=new(p) BrowserCookieJar(); }
-    if (!lines || !links || !history || !forward || !bookmarks || !cookieJar) {
+    if (!lines || !links || !images || !history || !forward || !bookmarks || !cookieJar) {
       if (lines) free(lines);
       if (links) free(links);
+      if (images) free(images);
       if (history) free(history);
   if (forward) free(forward);
       if (bookmarks) free(bookmarks);
       if(cookieJar){cookieJar->~BrowserCookieJar();free(cookieJar);cookieJar=nullptr;}
-      lines = nullptr; links = nullptr; history = nullptr; forward = nullptr; bookmarks = nullptr; poolsReady = false;
+      lines = nullptr; links = nullptr; images = nullptr; history = nullptr; forward = nullptr; bookmarks = nullptr; poolsReady = false;
       snprintf(errorText, sizeof(errorText), "Browser memory unavailable");
       return false;
     }
     for (int i = 0; i < MAX_LINES; ++i) new (&lines[i]) BrowserLine();
     for (int i = 0; i < MAX_LINKS; ++i) new (&links[i]) BrowserLink();
+    for (int i = 0; i < MAX_IMAGES; ++i) new (&images[i]) BrowserImage();
     memset(history, 0, sizeof(char[192]) * HISTORY_MAX);
     memset(forward, 0, sizeof(char[192]) * FORWARD_MAX);
     memset(bookmarks, 0, sizeof(char[192]) * BOOKMARK_MAX);
@@ -244,12 +250,14 @@ bool BrowserService::begin(StorageService *storageRef) {
 void BrowserService::resetPage() {
   lineUsed = 0;
   linkUsed = 0;
+  imageUsed = 0;
   httpStatus = 0;
   pageTitle[0] = 0;
   errorText[0] = 0;
   cachedPage = false;
   if (lines) for (int i = 0; i < MAX_LINES; ++i) { lines[i].text[0] = 0; lines[i].link = -1; }
   if (links) for (int i = 0; i < MAX_LINKS; ++i) { links[i].url[0] = 0; links[i].label[0] = 0; }
+  if (images) for(int i=0;i<MAX_IMAGES;++i){images[i].url[0]=0;images[i].alt[0]=0;images[i].line=-1;}
 }
 
 
@@ -1056,10 +1064,25 @@ void BrowserService::parseHtml(const char *src, size_t len) {
       return;
     }
     if (!closing && !strcmp(name,"img")) {
-      char alt[96];
-      if (htmlAttr(raw, "alt", alt, sizeof(alt)) && alt[0]) {
-        decodeEntities(alt);
-        addWrappedText(alt);
+      char alt[96]={0};
+      char source[192]={0};
+      htmlAttr(raw,"alt",alt,sizeof(alt));
+      htmlAttr(raw,"src",source,sizeof(source));
+      decodeEntities(alt);
+      // Preserve accessible text even when thumbnails cannot be fetched.
+      const int firstLine=lineUsed;
+      addWrappedText(alt[0]?alt:"[Image]");
+      if(images && imageUsed<MAX_IMAGES && source[0] && currentUrl[0] &&
+         strncmp(currentUrl,"mtt:",4)) {
+        BrowserImage &ref=images[imageUsed];
+        char resolved[192]={0};
+        if(resolveUrl(currentUrl,source,resolved,sizeof(resolved)) &&
+           !strncasecmp(resolved,"https://",8)) {
+          snprintf(ref.url,sizeof(ref.url),"%s",resolved);
+          snprintf(ref.alt,sizeof(ref.alt),"%s",alt);
+          ref.line=firstLine;
+          ++imageUsed;
+        }
       }
       return;
     }

@@ -1525,6 +1525,52 @@ void BrowserApp::redrawOverview(AppContext &ctx) {
   ctx.ui.softkeys("Options","Select","Back");
 }
 
+#if defined(VQEAF_PERF_DIAG)
+void BrowserApp::diagnosticBenchmark(AppContext &ctx) {
+  // Actual ST7789 writes from the same native Overview renderer, but keys
+  // are injected in software. This is NOT physical key-to-photon latency.
+  if(!ctx.browser.available()||ctx.browser.lineCount()<40) {
+    Serial.println("[QB][HW] result=INCONCLUSIVE reason=NO_SYNTHETIC_PAGE");
+    return;
+  }
+  constexpr int N=64;
+  uint32_t samples[N]={};
+  uint64_t sum=0;
+  uint32_t largest=0;
+  motion.reset(ctx.browser.lineCount());
+  motion.toggleOverview();
+  ctx.ui.chrome("QB LCD Diagnostic",statusWifi(),false,false,ctx.settings.data().hour12);
+  const uint32_t runStart=micros();
+  for(int i=0;i<N;++i) {
+    if(i&&i%8==0)motion.zoom(1);
+    motion.overviewPan((i%12)<8?1:-1);
+    const uint32_t began=micros();
+    redrawOverview(ctx);
+    const uint32_t elapsed=(uint32_t)(micros()-began);
+    samples[i]=elapsed;
+    sum+=elapsed;
+    if(elapsed>largest)largest=elapsed;
+    yield();
+  }
+  const uint32_t runDuration=(uint32_t)(micros()-runStart);
+  // Selection sort on a 256-byte local array avoids heap/float dependencies.
+  for(int i=0;i<N;++i)
+    for(int j=i+1;j<N;++j)
+      if(samples[j]<samples[i]){
+        const uint32_t t=samples[i];samples[i]=samples[j];samples[j]=t;
+      }
+  const uint32_t p95=samples[(N*95+99)/100-1];
+  const uint32_t mean=(uint32_t)(sum/N);
+  const uint32_t rateX10=runDuration?(uint32_t)((uint64_t)N*10000000ULL/runDuration):0;
+  Serial.printf("[QB][HW] render_samples=%d render_avg_us=%lu render_p95_us=%lu render_max_us=%lu throughput_fps_x10=%lu work=overview_x1_to_x8 input=synthetic fps_cap=30 heap8=%lu psram=%lu\\n",
+    N,(unsigned long)mean,(unsigned long)p95,(unsigned long)largest,
+    (unsigned long)rateX10,
+    (unsigned long)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+    (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+  motion.toggleOverview();
+}
+#endif
+
 void BrowserApp::tick(AppContext &ctx,bool visible) {
   if(!visible || ctx.keyboard.active() || popup.open)return;
   const uint32_t now=millis();

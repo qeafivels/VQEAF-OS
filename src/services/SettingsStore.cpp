@@ -3,17 +3,18 @@
 void SettingsStore::begin() {
   prefs.begin("symbian-s3", false);
   // Keep existing NVS namespace and numeric IDs; External must remain 4.
-  // v4 makes Midnight the default for new installs and migrates the previous
-  // factory Lime default, but retains explicitly selected other/custom themes.
+  // v4 sets the user-requested Midnight default once even on already deployed
+  // devices with older built-in themes. Imported SD themes are preserved.
+  // Old built-in skins remain selectable after this one-time upgrade.
   const uint8_t themeRev=prefs.getUChar("themeRev",0);
   const bool hadTheme=prefs.isKey("theme");
   const uint8_t saved=prefs.getUChar("theme",static_cast<uint8_t>(ThemeId::ModernDark));
   const bool valid=saved<=static_cast<uint8_t>(ThemeId::ModernDark);
   if(!hadTheme||!valid){
     cfg.theme=ThemeId::ModernDark;
-  }else if(themeRev<4&&saved==static_cast<uint8_t>(ThemeId::S60Green)){
-    // The device's previous shipping default; requested modern replacement.
-    // Users may re-select Lime from Themes after the one-time migration.
+  }else if(themeRev<4&&saved!=static_cast<uint8_t>(ThemeId::External)){
+    // One-time opt-in shipping-default migration requested for this device.
+    // The user can freely choose their prior built-in skin afterward.
     cfg.theme=ThemeId::ModernDark;
   }else{
     cfg.theme=static_cast<ThemeId>(saved);

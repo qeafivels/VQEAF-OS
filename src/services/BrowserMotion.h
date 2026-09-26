@@ -48,7 +48,9 @@ public:
   bool overview() const {return overviewMode;}
   void zoom(int direction) {
     int v=int(zoomLevel)+direction;
-    if(v<1)v=1;if(v>8)v=8;zoomLevel=(uint8_t)v;
+    if(v<1) v=1;
+    if(v>8) v=8;
+    zoomLevel=(uint8_t)v;
   }
   int zoomValue() const {return zoomLevel;}
   int pixel() const {return visualQ8 >> 8;}

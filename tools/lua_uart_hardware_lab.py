@@ -23,9 +23,12 @@ def main():
                     buf.extend(port.read(4096))
                     if len(buf)>64000:
                         buf=buf[-32000:]
-                    lines=buf.decode("utf-8",errors="replace").splitlines()
-                    for line in reversed(lines):
-                        if needle in line and line.endswith("\r")==False:
+                    if b"\n" not in buf:
+                        continue
+                    complete,tail=buf.rsplit(b"\n",1)
+                    buf=bytearray(tail)
+                    for line in reversed(complete.decode("utf-8",errors="replace").splitlines()):
+                        if needle in line:
                             return line.strip()
                 return ""
             # Opening a CH340 handle may reset the board via DTR.

@@ -55,7 +55,7 @@ public:
 inline bool operator==(const char*a,const String&b){return b==a;} inline bool operator!=(const char*a,const String&b){return !(b==a);}
 class Stream { public: virtual ~Stream(){} };
 class IPAddress { public: String toString() const {return String("0.0.0.0");} };
-class SerialClass { public: void begin(int){} template<class...A> void printf(const char*,A...){ } template<class T> void print(const T&){} template<class T> void println(const T&){} void println(){} int available(){return 0;} int read(){return -1;} };
+class SerialClass { public: void begin(int){} template<class...A> void printf(const char*,A...){ } template<class T> void print(const T&){} template<class T> void println(const T&){} void println(){} void flush(){} int available(){return 0;} int read(){return -1;} };
 extern SerialClass Serial;
 class ESPClass { public: uint32_t getFreeHeap() const{return 200000;} uint32_t getFreePsram() const{return 8000000;} uint32_t getMinFreeHeap() const{return 100000;} uint32_t getPsramSize() const{return 8000000;} void restart(){} };
 extern ESPClass ESP;

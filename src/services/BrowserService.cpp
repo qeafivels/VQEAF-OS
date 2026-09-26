@@ -247,6 +247,22 @@ bool BrowserService::begin(StorageService *storageRef) {
   return true;
 }
 
+#if defined(VQEAF_PERF_DIAG)
+void BrowserService::diagnosticPage() {
+  if(!poolsReady)return;
+  resetPage();
+  snprintf(currentUrl,sizeof(currentUrl),"%s","mtt:diag");
+  snprintf(requestedUrl,sizeof(requestedUrl),"%s",currentUrl);
+  snprintf(pageTitle,sizeof(pageTitle),"%s","Isolated LCD benchmark");
+  retryPending=false;httpStatus=200;
+  for(int i=0;i<72;++i){
+    char line[58]={};
+    snprintf(line,sizeof(line),"Preview tile %02d  VQEAF render stress 1234",i);
+    addWrappedText(line);
+  }
+}
+#endif
+
 void BrowserService::resetPage() {
   lineUsed = 0;
   linkUsed = 0;

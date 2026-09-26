@@ -1481,7 +1481,8 @@ bool BrowserApp::redrawOverview(AppContext &ctx, bool forceFull) {
     const int x=17+(i%3)*69, y=58+(i/3)*64;
     // The focus extends one pixel past the panel, so erase exactly its old
     // bounds. Neighbouring tiles have 5px gutters and are not touched.
-    d.fillRect(x-1,y-1,tileW+2,tileH+2,c.bg);
+    if(plan.kind!=BrowserOverviewDirty::Kind::Full)
+      d.fillRect(x-1,y-1,tileW+2,tileH+2,c.bg);
     d.fillRect(x,y,tileW,tileH,c.panel);
     d.drawRect(x,y,tileW,tileH,c.dim);
     if(tileIndex>=total)return;

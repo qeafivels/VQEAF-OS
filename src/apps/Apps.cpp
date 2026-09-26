@@ -1611,7 +1611,7 @@ void BrowserApp::diagnosticBenchmark(AppContext &ctx) {
   for(int i=0;i<32;++i){
     fullSum+=compareFull[i];dirtySum+=compareDirty[i];
   }
-  Serial.printf("[QB][HW][COMPARE] frames=32 full_avg_us=%lu dirty_avg_us=%lu workload=focus_0_to_3_zoom4 input=synthetic\\n",
+  Serial.printf("[QB][HW][COMPARE] frames=32 full_avg_us=%lu dirty_avg_us=%lu workload=focus_0_to_3_zoom4 input=synthetic\n",
     (unsigned long)(fullSum/32),(unsigned long)(dirtySum/32));
   overviewDirty.invalidate();
   motion.toggleOverview();

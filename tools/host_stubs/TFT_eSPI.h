@@ -4,6 +4,9 @@
 #define TFT_WHITE 0xFFFF
 #define TFT_RED 0xF800
 class TFT_eSPI { bool swapBytes=false; public:
+  void setViewport(int32_t,int32_t,int32_t,int32_t,bool=false) {}
+  void resetViewport() {}
+
  void init(){} void setRotation(int){} void fillScreen(uint16_t){} void setTextWrap(bool){} void setTextFont(int){} void setTextSize(int){} void setTextColor(uint16_t,uint16_t=0){} void setCursor(int,int){}
  template<class T> void print(const T&){} int textWidth(const String&s){return (int)s.length()*7;} int textWidth(const char*s){return s?(int)strlen(s)*7:0;}
  void fillRect(int,int,int,int,uint16_t){} void drawRect(int,int,int,int,uint16_t){} void drawFastHLine(int,int,int,uint16_t){} void drawFastVLine(int,int,int,uint16_t){} void drawLine(int,int,int,int,uint16_t){} void fillCircle(int,int,int,uint16_t){} void drawCircle(int,int,int,uint16_t){} void fillTriangle(int,int,int,int,int,int,uint16_t){}

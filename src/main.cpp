@@ -628,11 +628,11 @@ static void diagCommand(const String &cmd) {
     LuaDiagCounts counts;
     QeLuaRuntime::Draw callbacks={luaDiagRect,luaDiagText,luaMillis,&counts};
     static const char fixture[]=
-      "function on_update(dt) if dt<0 then error('dt') end end\\n"
+      "function on_update(dt) if dt<0 then error('dt') end end\n"
       "function on_draw() engine.clear(0); engine.rect(1,2,3,4,65535);"
-      " engine.text(5,6,'Lua OK',65535) end\\n"
+      " engine.text(5,6,'Lua OK',65535) end\n"
       "function on_key(k,down) if down and k=='up' then"
-      " engine.rect(2,3,4,5,31) end end\\n";
+      " engine.rect(2,3,4,5,31) end end\n";
     const bool launched=luaVm.start(fixture,sizeof(fixture)-1,callbacks,64*1024);
     const bool ok=launched&&luaVm.update(0.05f)&&luaVm.render()&&
                   luaVm.key("up",true)&&counts.rect>=3&&counts.text==1;

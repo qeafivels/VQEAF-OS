@@ -52,12 +52,12 @@ inline ThemeColors themeFor(ThemeId id) {
       0x9D79, // dim #9EADCA
       0x10C4, // chrome #101826
       0xEFBF, // chromeText
-      0x647F, // accent #658CFF
+      0x859F, // accent #84B2FF: 5.8:1 vs focused tile, 8:1 vs card
       0xFAAE, // danger #FF5477
       0x10E6, // popup #151E30
       0xF7BF, // popupText
       0x29CC, // popupSelected #283A60
-      0x322C  // border #354664
+      0x322C  // border #354664: low-noise separators (not text)
     };
   }
   if (id == ThemeId::S60Green) {

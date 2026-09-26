@@ -6,11 +6,12 @@ C++ array is small and requires no TTF engine, heap allocation or filesystem.
 Regenerate only when the source font is installed and its license is respected.
 """
 from pathlib import Path
+import os
 import unicodedata
 from PIL import Image,ImageDraw,ImageFont
 root=Path(__file__).resolve().parents[1]
-fontdir=Path('/usr/share/fonts/truetype/dejavu')
-fonts=[(fontdir/'DejaVuSans.ttf',10,12),(fontdir/'DejaVuSans-Bold.ttf',13,16)]
+fontdir=Path(os.environ.get('VQEAF_FONT_DIR', '/usr/share/fonts/truetype/dejavu'))
+fonts=[(fontdir/'DejaVuSans.ttf',11,14),(fontdir/'DejaVuSans-Bold.ttf',13,16)]
 base='aăâeêioôơuưyAĂÂEÊIOÔƠUƯY'
 tones=['','\u0300','\u0301','\u0309','\u0303','\u0323']
 letters={ord(unicodedata.normalize('NFC', b+t)) for b in base for t in tones}
@@ -66,7 +67,7 @@ inline int measure(const char *s,uint8_t role) {
 inline int draw(TFT_eSPI &tft,int x,int y,const char *s,uint16_t fg,uint16_t bg,uint8_t role,int clipW=240) {
   const int start=x;int drawn=0;
   // One opaque background region prevents stale glyphs during focused redraws.
-  const int count=measure(s,role);tft.fillRect(x,y,min(clipW,count),role==1?18:15,bg);
+  const int count=measure(s,role);tft.fillRect(x,y,min(clipW,count),18,bg);
   while(s&&*s){uint32_t cp=next(s);const Glyph *g=lookup(cp>65535?'?':cp,role);
     if(x+g->advance>start+clipW)break;
     for(int yy=0;yy<18;++yy){uint16_t bits=g->rows[yy];int xx=0;
@@ -86,5 +87,7 @@ inline int draw(TFT_eSPI &tft,int x,int y,const char *s,uint16_t fg,uint16_t bg,
 '''.replace('inline const Glyph *lookup(uint16_t cp,uint8_t role) {','inline const Glyph *lookupFallback(uint8_t role) {\n  const Glyph *g=role==1?glyphs1:glyphs0;\n  const size_t n=role==1?sizeof(glyphs1)/sizeof(Glyph):sizeof(glyphs0)/sizeof(Glyph);\n  for(size_t i=0;i<n;++i)if(g[i].cp==\'?\')return &g[i];return g;\n}\ninline const Glyph *lookup(uint16_t cp,uint8_t role) {'))
 target=root/'src/core/UiVietnameseFont.h';content='\n'.join(lines)+'\n'
 content=content.replace("for(size_t i=0;i<n;++i)if(g[i].cp=='?')return &g[i];return g;","for(size_t i=0;i<n;++i){if(g[i].cp=='?')return &g[i];}\n  return g;")
+# Keep clock glyph scaling generated from exactly the same tables.
+content=content.replace('} // UiVietnameseFont', "// Midnight's large clock uses the same verified NFC/ASCII bitmap glyphs\n// at integer scale. No runtime font files, glyph cache, alpha raster or heap.\ninline int drawScaled(TFT_eSPI &tft,int x,int y,const char *s,uint16_t fg,\n                      uint16_t bg,uint8_t role,uint8_t scale,int clipW=240) {\n  if(!s||!scale||clipW<=0)return 0;\n  const int start=x;\n  const int total=measure(s,role)*scale;\n  tft.fillRect(x,y,min(clipW,total),18*scale,bg);\n  while(*s){\n    const uint32_t cp=next(s);\n    const Glyph *g=lookup(cp>65535?'?':cp,role);\n    const int step=g->advance*scale;\n    if(x+step>start+clipW)break;\n    for(int yy=0;yy<18;++yy){\n      const uint16_t bits=g->rows[yy];\n      int xx=0;\n      while(xx<16){\n        while(xx<16 && !(bits&(1u<<xx)))++xx;\n        if(xx>=16)break;\n        const int first=xx;\n        while(xx<16 && (bits&(1u<<xx)))++xx;\n        tft.fillRect(x+first*scale,y+yy*scale,(xx-first)*scale,scale,fg);\n      }\n    }\n    x+=step;\n  }\n  return x-start;\n}\n"+'} // UiVietnameseFont')
 target.write_text(content,encoding='utf-8')
 print('Generated',len(codepoints),'NFC glyphs ×2',target.stat().st_size,'bytes of source')

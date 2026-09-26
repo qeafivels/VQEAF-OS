@@ -1465,7 +1465,7 @@ void BrowserApp::redrawOverview(AppContext &ctx) {
   d.fillRect(0,29,240,269,c.bg);
   d.setTextFont(1);d.setTextColor(c.text,c.bg);
   d.setCursor(8,37);d.print("Page Overview");
-  d.setCursor(198,37);d.printf("x%d",motion.zoomValue());
+  d.setCursor(198,37);d.print(String("x")+motion.zoomValue());
   const int perTile=max(3,25/motion.zoomValue());
   const int total=max(1,(ctx.browser.lineCount()+perTile-1)/perTile);
   const int selected=min(total-1,motion.targetPixel()/16/perTile);
@@ -1519,7 +1519,7 @@ void BrowserApp::redrawOverview(AppContext &ctx) {
   d.fillRect(230,58+progress,4,18,c.accent);
   d.fillRect(0,261,240,36,c.bg);
   d.setTextColor(c.dim,c.bg);d.setCursor(12,268);
-  d.printf("Tile %d/%d   Zoom x%d",selected+1,total,motion.zoomValue());
+  d.print(String("Tile ")+(selected+1)+"/"+total+"   Zoom x"+motion.zoomValue());
   d.setCursor(12,283);d.print("UP/DN Pan  LEFT/RIGHT Zoom");
   ctx.ui.softkeys("Options","Select","Back");
 }

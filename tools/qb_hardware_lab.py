@@ -70,14 +70,35 @@ def main():
     args.output.mkdir(parents=True,exist_ok=True)
     stamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     lines=[]
-    with serial.Serial(args.port,args.baud,timeout=.25,write_timeout=2) as port:
+    def connect(max_seconds=14):
+        end=time.monotonic()+max_seconds
+        while time.monotonic()<end:
+            try:
+                return serial.Serial(args.port,args.baud,timeout=.25,write_timeout=2)
+            except (OSError,serial.SerialException):
+                time.sleep(1)
+        raise RuntimeError("COM port unavailable; check CH340, USB cable and Device Manager")
+    port_slot=[connect()]
+    try:
         # Opening CH340 may already toggle DTR; don't blindly write USB reset.
         pending=bytearray()
         def gather(seconds,expect=None):
             found=False
             stop=time.monotonic()+seconds
             while time.monotonic()<stop:
-                payload=port.read(2048)
+                try:
+                    payload=port_slot[0].read(2048)
+                except (OSError,serial.SerialException):
+                    try:port_slot[0].close()
+                    except Exception:pass
+                    try:
+                        replacement=connect(max_seconds=8)
+                        # Rebound via a one-element list below to avoid retaining
+                        # a dead CH340 handle after Windows re-enumerates it.
+                        port_slot[0]=replacement
+                        payload=b""
+                    except RuntimeError:
+                        continue
                 pending.extend(payload)
                 while b"\n" in pending:
                     raw,_,tail=pending.partition(b"\n");pending[:]=tail
@@ -89,7 +110,7 @@ def main():
                 if found:return True
             return found
         if args.mode=="roundtrip":
-            port.write(b"diag qb stage\n")
+            port_slot[0].write(b"diag qb stage\n")
             if not gather(12,"[QB][RECOVERY] stage=PASS"):
                 print("INCONCLUSIVE: no staged diagnostic fixture; board may run older firmware")
             else:
@@ -112,6 +133,9 @@ def main():
         if args.seconds>0:
             print("Operate the physical keypad in Browser Overview now, when testing browser FPS.")
             gather(args.seconds)
+    finally:
+        try:port_slot[0].close()
+        except Exception:pass
     report={
         "timestamp_utc":stamp,"port":args.port,"mode":args.mode,
         "seconds_requested":args.seconds,"metrics":metrics(lines),

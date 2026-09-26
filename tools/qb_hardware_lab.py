@@ -131,7 +131,9 @@ def main():
                     print("INCONCLUSIVE: opt-in reboot not acknowledged")
                 else:
                     # UART CH340 can stop producing bytes during restart.
+                    boot_start=len(lines)
                     boot=gather(25,"[VQEAF][BUILD]")
+                    boot=boot or any(line.startswith("[VQEAF][CORE][BROWSER]") for line in lines[boot_start:])
                     port_slot[0].write(b"diag qb verify\n")
                     verified=gather(12,"[QB][RECOVERY] verify=PASS")
                     print("RECOVERY", "PASS" if verified and boot else "INCONCLUSIVE",

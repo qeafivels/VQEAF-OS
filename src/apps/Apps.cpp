@@ -1424,6 +1424,7 @@ void BrowserApp::enter(AppContext &ctx) {
 
 void BrowserApp::resetMotion(AppContext &ctx) {
   motion.reset(ctx.browser.lineCount());
+  overviewDirty.invalidate();
   nextThumb=0;lastThumbAttempt=0;
   lastMotionPaint=0;lastMetrics=0;motionFrames=0;
   offset=0;
@@ -1461,23 +1462,29 @@ void BrowserApp::redrawBody(AppContext &ctx) {
   ctx.ui.softkeys("Options",selectedLink>=0?"Open":"", "Back");
 }
 
-void BrowserApp::redrawOverview(AppContext &ctx) {
-  TFT_eSPI &d=ctx.ui.display();ThemeColors c=ctx.ui.c();
-  d.fillRect(0,29,240,269,c.bg);
-  d.setTextFont(1);d.setTextColor(c.text,c.bg);
-  d.setCursor(8,37);d.print("Page Overview");
-  d.setCursor(198,37);d.print(String("x")+motion.zoomValue());
+void BrowserApp::redrawOverview(AppContext &ctx, bool forceFull) {
+  TFT_eSPI &d=ctx.ui.display();
+  const ThemeColors c=ctx.ui.c();
   const int perTile=max(3,25/motion.zoomValue());
   const int total=max(1,(ctx.browser.lineCount()+perTile-1)/perTile);
   const int selected=min(total-1,motion.targetPixel()/16/perTile);
   const int firstTile=min(max(0,selected-4),max(0,total-9));
-  const int tileW=64,tileH=58;
-  for(int i=0;i<9;++i){
+  const int track=198;
+  const int progress=motion.maxScroll()?
+    (motion.targetPixel()*(track-18))/motion.maxScroll():0;
+  const auto plan=overviewDirty.update(forceFull,firstTile,motion.zoomValue(),
+                                        selected,progress);
+  if(plan.kind==BrowserOverviewDirty::Kind::None)return;
+  constexpr int tileW=64,tileH=58;
+  auto paintTile=[&](int i){
     const int tileIndex=firstTile+i;
     const int x=17+(i%3)*69, y=58+(i/3)*64;
+    // The focus extends one pixel past the panel, so erase exactly its old
+    // bounds. Neighbouring tiles have 5px gutters and are not touched.
+    d.fillRect(x-1,y-1,tileW+2,tileH+2,c.bg);
     d.fillRect(x,y,tileW,tileH,c.panel);
     d.drawRect(x,y,tileW,tileH,c.dim);
-    if(tileIndex>=total)continue;
+    if(tileIndex>=total)return;
     const int first=tileIndex*perTile;
     const int last=min(ctx.browser.lineCount(),first+perTile);
     int imageIndex=-1;
@@ -1489,7 +1496,7 @@ void BrowserApp::redrawOverview(AppContext &ctx) {
     if(imageIndex>=0){
       thumbnail=thumbs.draw(d,ctx.browser.imageAt(imageIndex).url,x,y+8);
     }
-    if(!thumbnail) {
+    if(!thumbnail){
       const int rows=min(8,last-first);
       for(int j=0;j<rows;++j){
         const int line=first+(j*max(1,last-first))/max(1,rows);
@@ -1498,12 +1505,12 @@ void BrowserApp::redrawOverview(AppContext &ctx) {
         const int w=min(54,max(4,chars*2/motion.zoomValue()));
         d.fillRect(x+5,y+7+j*6,w,3,entry.link>=0?c.accent:c.dim);
       }
-      if(imageIndex>=0){d.setTextColor(c.accent,c.panel);
-        d.setCursor(x+5,y+48);d.print("IMG");}
+      if(imageIndex>=0){
+        d.setTextColor(c.accent,c.panel);
+        d.setCursor(x+5,y+48);d.print("IMG");
+      }
     }
-    if(tileIndex==selected) {
-      // Opera Mini-era overview cursor: blue frame, corner handles,
-      // center crosshair; each tile is a bounded page-preview region.
+    if(tileIndex==selected){
       d.drawRect(x-1,y-1,tileW+2,tileH+2,c.accent);
       d.fillRect(x-1,y-1,5,5,c.accent);
       d.fillRect(x+tileW-4,y-1,5,5,c.accent);
@@ -1512,17 +1519,33 @@ void BrowserApp::redrawOverview(AppContext &ctx) {
       d.drawFastHLine(x+tileW/2-3,y+tileH/2,7,c.accent);
       d.drawFastVLine(x+tileW/2,y+tileH/2-3,7,c.accent);
     }
+  };
+  if(plan.kind==BrowserOverviewDirty::Kind::Full){
+    d.fillRect(0,29,240,269,c.bg);
+    d.setTextFont(1);d.setTextColor(c.text,c.bg);
+    d.setCursor(8,37);d.print("Page Overview");
+    d.setCursor(198,37);d.print(String("x")+motion.zoomValue());
+    for(int i=0;i<9;++i)paintTile(i);
+  }else if(plan.kind==BrowserOverviewDirty::Kind::Selection){
+    // When a page-window scrolls, planner requests Full instead. Otherwise
+    // only the former/new focus tile must be repainted.
+    const int old=plan.previousSelected-firstTile;
+    const int next=selected-firstTile;
+    if(old>=0&&old<9)paintTile(old);
+    if(next>=0&&next<9&&next!=old)paintTile(next);
   }
-  const int track=198;
+  // Clear only the old scrollbar track, not the 9 tile cells.
+  d.fillRect(229,57,8,200,c.bg);
   d.drawFastVLine(232,58,track,c.dim);
-  const int progress=motion.maxScroll()?
-    (motion.targetPixel()*(track-18))/motion.maxScroll():0;
   d.fillRect(230,58+progress,4,18,c.accent);
-  d.fillRect(0,261,240,36,c.bg);
-  d.setTextColor(c.dim,c.bg);d.setCursor(12,268);
-  d.print(String("Tile ")+(selected+1)+"/"+total+"   Zoom x"+motion.zoomValue());
-  d.setCursor(12,283);d.print("UP/DN Pan  LEFT/RIGHT Zoom");
-  ctx.ui.softkeys("Options","Select","Back");
+  if(plan.kind!=BrowserOverviewDirty::Kind::Progress){
+    d.fillRect(0,261,240,36,c.bg);
+    d.setTextFont(1);d.setTextColor(c.dim,c.bg);d.setCursor(12,268);
+    d.print(String("Tile ")+(selected+1)+"/"+total+"   Zoom x"+motion.zoomValue());
+    d.setCursor(12,283);d.print("UP/DN Pan  LEFT/RIGHT Zoom");
+    if(forceFull || plan.kind==BrowserOverviewDirty::Kind::Full)
+      ctx.ui.softkeys("Options","Select","Back");
+  }
 }
 
 #if defined(VQEAF_PERF_DIAG)
@@ -1579,7 +1602,7 @@ void BrowserApp::tick(AppContext &ctx,bool visible) {
   if((uint32_t)(now-lastMotionPaint)>=33UL) {
     lastMotionPaint=now;
     if(motion.tick(now)) {
-      if(motion.overview())redrawOverview(ctx);
+      if(motion.overview())redrawOverview(ctx,false);
       else redrawBody(ctx);
       ++motionFrames;
     }
@@ -1667,7 +1690,10 @@ ScreenId BrowserApp::handle(AppContext &ctx,const KeyEvent &e){
     if(e.key==Key::Up||e.key==Key::Down)motion.overviewPan(e.key==Key::Down?1:-1);
     if(e.key==Key::Left||e.key==Key::Right)motion.zoom(e.key==Key::Right?1:-1);
     if(e.key==Key::Start||e.key==Key::Select)motion.toggleOverview();
-    draw(ctx);return ScreenId::Browser;
+    if(motion.overview() && (e.key==Key::Up||e.key==Key::Down))
+      redrawOverview(ctx,false);
+    else draw(ctx);
+    return ScreenId::Browser;
   }
   if(e.key==Key::A||e.key==Key::B)return launchedFromPackage?ScreenId::Applications:ScreenId::Launcher;
   if(e.key==Key::Option){popup.show();drawPopup(ctx,popup,browserOptions,BROWSER_OPTIONS);return ScreenId::Browser;}

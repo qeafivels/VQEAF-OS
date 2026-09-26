@@ -65,6 +65,7 @@ def main():
     ap.add_argument("--mode",choices=["baseline","roundtrip","verify"],default="baseline")
     ap.add_argument("--seconds",type=int,default=30)
     ap.add_argument("--output",type=Path,default=Path("qb_hardware_results"))
+    ap.add_argument("--keep-fixtures",action="store_true",help="Leave synthetic recovery artifacts for inspection")
     args=ap.parse_args()
     args.output.mkdir(parents=True,exist_ok=True)
     stamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -102,6 +103,9 @@ def main():
                     verified=gather(12,"[QB][RECOVERY] verify=PASS")
                     print("RECOVERY", "PASS" if verified and boot else "INCONCLUSIVE",
                           "boot_seen=",boot,"verify_pass=",verified)
+                    if verified and not args.keep_fixtures:
+                        port.write(b"diag qb cleanup\n")
+                        gather(5,"[QB][RECOVERY] cleanup=COMPLETE")
         elif args.mode=="verify":
             port.write(b"diag qb verify\n")
             gather(12,"[QB][RECOVERY] verify=")

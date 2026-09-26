@@ -1390,7 +1390,7 @@ ScreenId TextViewerApp::handle(AppContext &ctx,const KeyEvent &e) {
 }
 
 // ---------------- Qeafbrowser ----------------
-static const char *const browserOptions[] = {"Enter address", "Home", "Reload", "Back", "Download link", "Downloads", "Page info", "Speed Dial", "History", "Bookmarks", "Bookmark page", "Help"};
+static const char *const browserOptions[] = {"Enter address", "Home", "Reload", "Back", "Forward", "Download link", "Downloads", "Page info", "Speed Dial", "History", "Bookmarks", "Bookmark page", "Help"};
 static constexpr int BROWSER_OPTIONS=sizeof(browserOptions)/sizeof(browserOptions[0]);
 static constexpr int BROWSER_VISIBLE=13;
 
@@ -1461,7 +1461,7 @@ ScreenId BrowserApp::handle(AppContext &ctx,const KeyEvent &e){
   if(ctx.keyboard.active()){if(ctx.keyboard.handle(e)){if(ctx.keyboard.accepted()){String u=ctx.keyboard.value();ctx.ui.message("Qeafbrowser","Loading...",u);ctx.browser.load(u);offset=0;selectedLink=ctx.browser.linkCount()?0:-1;}draw(ctx);}return ScreenId::Browser;}
   if(!e.pressed||e.longPress)return ScreenId::Browser;
   if(ctx.system.safeMode()){if(e.key==Key::A||e.key==Key::B)return launchedFromPackage?ScreenId::Applications:ScreenId::Launcher;return ScreenId::Browser;}
-  if(popup.open){if(e.key==Key::Start||e.key==Key::Select){int choice=popup.index;popup.close();if(choice==0){String initial=ctx.browser.url();if(initial.startsWith("mtt:"))initial="";ctx.keyboard.open("Web address",initial,false);draw(ctx);return ScreenId::Browser;}if(choice==1){loadHome(ctx);draw(ctx);return ScreenId::Browser;}if(choice==2){ctx.ui.message("Qeafbrowser","Reloading...",ctx.browser.url());ctx.browser.reload();offset=0;selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);return ScreenId::Browser;}if(choice==3){ctx.browser.goBack();offset=0;selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);return ScreenId::Browser;}if(choice==4){
+  if(popup.open){if(e.key==Key::Start||e.key==Key::Select){int choice=popup.index;popup.close();if(choice==0){String initial=ctx.browser.url();if(initial.startsWith("mtt:"))initial="";ctx.keyboard.open("Web address",initial,false);draw(ctx);return ScreenId::Browser;}if(choice==1){loadHome(ctx);draw(ctx);return ScreenId::Browser;}if(choice==2){ctx.ui.message("Qeafbrowser","Reloading...",ctx.browser.url());ctx.browser.reload();offset=0;selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);return ScreenId::Browser;}if(choice==3){ctx.browser.goBack();offset=0;selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);return ScreenId::Browser;}if(choice==4){ctx.browser.goForward();offset=0;selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);return ScreenId::Browser;}if(choice==5){
         if(selectedLink<0){ctx.ui.message("Download","Select a page link first");ctx.ui.softkeys("","","Back");return ScreenId::Browser;}
         String saved,err;ctx.ui.message("Qeafbrowser","Downloading...",ctx.browser.linkAt(selectedLink).label);
         if(ctx.browser.download(ctx.browser.linkAt(selectedLink).url,saved,err)){
@@ -1480,13 +1480,13 @@ ScreenId BrowserApp::handle(AppContext &ctx,const KeyEvent &e){
         }
         else ctx.ui.message("Download failed",err,ctx.browser.linkAt(selectedLink).url);
         ctx.ui.softkeys("","","Back");return ScreenId::Browser;
-      }if(choice==5){ctx.pendingFolderPath=StoragePaths::DOWNLOADS;return ScreenId::Files;}if(choice==6){ctx.ui.message("Page info",ctx.browser.title(),ctx.browser.url(),String(ctx.browser.pageFromCache()?"CACHE  ":"HTTP ")+String(ctx.browser.status())+"  "+String(ctx.browser.lineCount())+" lines");ctx.ui.softkeys("","","Back");return ScreenId::Browser;}
-        if(choice>=7 && choice<=9 || choice==11){
-          const char *dest=choice==7?"mtt:start":choice==8?"mtt:history":choice==9?"mtt:bookmark":"mtt:help";
+      }if(choice==6){ctx.pendingFolderPath=StoragePaths::DOWNLOADS;return ScreenId::Files;}if(choice==7){ctx.ui.message("Page info",ctx.browser.title(),ctx.browser.url(),String(ctx.browser.pageFromCache()?"CACHE  ":"HTTP ")+String(ctx.browser.status())+"  "+String(ctx.browser.lineCount())+" lines");ctx.ui.softkeys("","","Back");return ScreenId::Browser;}
+        if((choice>=8 && choice<=10) || choice==12){
+          const char *dest=choice==8?"mtt:start":choice==9?"mtt:history":choice==10?"mtt:bookmark":"mtt:help";
           ctx.browser.load(dest);offset=0;selectedLink=ctx.browser.linkCount()?0:-1;draw(ctx);
           return ScreenId::Browser;
         }
-        if(choice==10){
+        if(choice==11){
           bool saved=ctx.browser.bookmarkCurrent();
           ctx.notifications.push("Qeafbrowser",saved?"Bookmark saved":"Cannot save bookmark");
           draw(ctx);return ScreenId::Browser;

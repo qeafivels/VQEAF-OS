@@ -18,10 +18,10 @@ Nguồn: `nectvety-software/legacy-32-classic-E524546/projects/Qeafbrowser_v1.7`
 | URL, redirect tương đối, HTTP/HTTPS | Có | Có; HTTPS dùng CA đáng tin cậy | TLS thực trên bo và redirect bất thường |
 | Quay lại / tiến tới | Có | **Back + Forward 12 URL**, cấp PSRAM một lần; không đổi stack khi tải lỗi | Kiểm thử web có redirect và offline |
 | HTML/WML, liên kết và focus keypad | Parser lớn hơn | Parser đơn giản native; WML anchor/go | Port từng phần WML/card và test fixture |
-| Overview tile, zoom x1..x8, minimap | Có | Chưa tương đương | Port renderer theo VQEAF UI, không import LovyanGFX |
-| JPEG/PNG thumbnail + LRU PSRAM/LittleFS CRC | Có | Chưa có trong nội dung Browser native | Tái dùng decoder OS, giới hạn budget/cache |
-| Pixel scroll và quán tính D-pad | Có | Hiện tại scroll theo dòng | Cổng fixed-point và kiểm tra FPS |
-| Cookie phiên và history/bookmark bền | Có | Bookmark bền; history phiên; chưa port cookie | Thêm store scoped theo domain |
+| Overview tile, zoom x1..x8, minimap | Có | Đã có thử nghiệm lưới preview 3×3, zoom x1..x8, con trỏ/crosshair, thanh cuộn; renderer native OS | Kiểm tra fidelity ảnh/tile với standalone và tương tác phím thật |
+| JPEG/PNG thumbnail + LRU PSRAM/LittleFS CRC | Có | Có thử nghiệm JPEG/PNG HTTPS vào 3 tile PSRAM RGB565 64×48; cache LittleFS CRC32, SD fallback khi LittleFS không mount | Thử ảnh thật, trường hợp decode lỗi, 96 KiB/ảnh, cache 24 tệp, gỡ SD |
+| Pixel scroll và quán tính D-pad | Có | Đã nối cuộn theo pixel Q8/quán tính D-pad, hạn chế repaint đến 30 Hz; không thêm framebuffer | Đo FPS và độ trễ phím Serial 115200 trên thiết bị |
+| Cookie phiên và history/bookmark bền | Có | Bookmark bền; history phiên; cookie host-only/path/secure giới hạn 12, ghi atomic lên microSD | Chưa đầy đủ RFC6265, expiry/PSL/SameSite; bảo vệ dữ liệu nhạy cảm và nghiệm thu khôi phục SD |
 | Bàn phím/nguồn WiFi | Có | Dùng bộ nhập liệu và quản lý WiFi OS | Test phím thật 240x320 |
 | Giao diện S60 đậm/pixel-perfect | Có | Dùng theme/chrome OS thay vì LovyanGFX | Mẫu giao diện phù hợp OS |
 | Download | Có | Có, HTTPS xác minh và route installer/theme OS | SD tháo nóng, lỗi nguồn/timeout |
@@ -29,9 +29,20 @@ Nguồn: `nectvety-software/legacy-32-classic-E524546/projects/Qeafbrowser_v1.7`
 
 ## Ngưỡng chấp nhận
 
-1. `python tools/test_qeafbrowser_os.py`: forward/back stack, URL/TLS, bookmark, installer routing.
+1. `python tools/test_qeafbrowser_os.py`: forward/back stack, URL/TLS, bookmark, installer routing. Chạy thêm `python tools/test_browser_feature_parity.py` và `g++ -std=c++11 -O2 -Wall -Wextra -Werror tools/browser_parity_host.cpp -o qb-test && ./qb-test` trên Linux/CI để kiểm tra motion, giới hạn zoom, cookie và CRC cache.
 2. `python tools/test_lua_transition_noblank.py` và `python tools/test_backguard_v251.py`: không hồi quy Back r2/Lua.
 3. `pio run -e vqeaf_os` và `pio run -e vqeaf_lua_beta`: cả hai profile biên dịch.
 4. Hardware ESP32-S3: duyệt 20 trang, 100 lượt Back/Forward, 30 phút D-pad scroll, mở/thoát liên tục, không watchdog, không giảm heap liên tục; chụp LCD và log Serial 115200; kiểm tra SD rút/lắp và TLS sai hostname.
 
-**Lưu ý:** Các gate Python hiện là kiểm tra cấu trúc, không thay thế simulator và kiểm chứng HTTP/ảnh/TFT thực. Không phát hành firmware production trước khi chạy đầy đủ kiểm thử phần cứng.
+**Lưu ý:** Đây là triển khai thử nghiệm, không phải sao chép pixel-perfect firmware standalone. Unit tests kiểm chứng logic motion/cookie/CRC; gate Python kiểm tra cấu trúc. Giải mã JPEG/PNG, HTTPS, tương tác LCD và FPS chưa được xác nhận trên thiết bị thật. Cookie lưu trên microSD là dữ liệu plaintext; không dùng đăng nhập nhạy cảm trước khi có audit và chính sách mã hóa/xóa dữ liệu. Chưa hỗ trợ hoàn chỉnh expires, public-suffix, SameSite, cookie nhiều header Set-Cookie trên cùng phản hồi hoặc HTML/WML 400 dòng như bản nguồn. Không phát hành firmware production trước khi nghiệm thu phần cứng và Lua beta.
+## Kiểm thử hồi quy theo tính năng mới
+
+| Thành phần | Bài kiểm thử đã viết | Phạm vi chưa chứng minh |
+|---|---|---|
+| Overview / zoom | Host unit của `BrowserMotion` và source gate lựa chọn menu, grid 3×3, x1..x8 | Pixel-perfect/độ mượt màn hình thật |
+| Cuộn pixel/quán tính | Host unit clamp, mục tiêu và settling, gate tick 30 Hz | Độ trễ phím, FPS trung bình/p95 LCD |
+| JPEG/PNG thumbnail | Source gate URL https/image-alt, callback decoder JPEG + PNG | Decode nội dung thực/tính đúng màu trên ST7789 |
+| PSRAM + LittleFS / SD | Host unit record FNV-64/CRC32 kích thước/tamper, source gate 3 tile và quota | LRU, lỗi nguồn, mount LittleFS cũ, rút thẻ SD thực |
+| Cookie | Host unit domain/path/HTTPS/Max-Age=0 và round trip | Nhiều Set-Cookie header, browser-grade RFC6265/Expires/SameSite |
+
+Lệnh chẩn đoán thiết bị: `pio run -e vqeaf_perf_diag -t upload`, `pio device monitor -b 115200` và đọc log `[QB][PERF]`. Giữ lại bản sao firmware đang dùng; không nạp CI Lua beta với khóa thử nghiệm lên thiết bị có ứng dụng đã ký.

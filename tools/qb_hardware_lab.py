@@ -22,7 +22,7 @@ except ImportError:
     raise SystemExit(2)
 
 WHITELIST = (
-    "[QB][PERF]", "[QB][RECOVERY]", "[VQEAF][FPS]", "[VQEAF][PERF]",
+    "[QB][PERF]", "[QB][HW]", "[QB][RECOVERY]", "[VQEAF][FPS]", "[VQEAF][PERF]",
     "[S3DIAG][SD]", "[VQEAF][BUILD]", "[VQEAF][CORE][BROWSER]",
 )
 FIELDS = re.compile(r"([A-Za-z][A-Za-z0-9_]*)=(-?[A-Za-z0-9_./]+)")
@@ -34,6 +34,7 @@ def metrics(lines):
     def group(prefix):
         return [parse(s) for s in lines if s.startswith(prefix)]
     qb, fps, perf = group("[QB][PERF]"), group("[VQEAF][FPS]"), group("[VQEAF][PERF]")
+    hw=group("[QB][HW]")
     def values(records,key, positive=False):
         out=[]
         for d in records:
@@ -49,6 +50,9 @@ def metrics(lines):
     return {
         "browser_animation_fps":summary(values(qb,"anim_fps",True)),
         "browser_perf_windows":len(qb),
+        "actual_lcd_overview_render_avg_us":summary(values(hw,"render_avg_us",True)),
+        "actual_lcd_overview_render_p95_us":summary(values(hw,"render_p95_us",True)),
+        "actual_lcd_render_throughput_fps":summary([x/10 for x in values(hw,"throughput_fps_x10",True)]),
         "input_dispatch_avg_us":summary(values(fps,"input_dispatch_avg_us",True)),
         "input_dispatch_p95_upper_us":summary(values(fps,"input_dispatch_p95_le_us",True)),
         "input_event_windows":sum(values(fps,"input_events")),
@@ -66,6 +70,7 @@ def main():
     ap.add_argument("--seconds",type=int,default=30)
     ap.add_argument("--output",type=Path,default=Path("qb_hardware_results"))
     ap.add_argument("--keep-fixtures",action="store_true",help="Leave synthetic recovery artifacts for inspection")
+    ap.add_argument("--bench",action="store_true",help="Trigger isolated 64-frame real TFT benchmark in PERF_DIAG")
     args=ap.parse_args()
     args.output.mkdir(parents=True,exist_ok=True)
     stamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -96,6 +101,7 @@ def main():
                         # Rebound via a one-element list below to avoid retaining
                         # a dead CH340 handle after Windows re-enumerates it.
                         port_slot[0]=replacement
+                        pending.clear() # Drop partial UART record interrupted by reboot.
                         payload=b""
                     except RuntimeError:
                         continue
@@ -130,6 +136,12 @@ def main():
         elif args.mode=="verify":
             port_slot[0].write(b"diag qb verify\n")
             gather(12,"[QB][RECOVERY] verify=")
+        if args.bench:
+            try:
+                port_slot[0].write(b"diag qb bench\n")
+                gather(24,"[QB][HW]")
+            except (OSError,serial.SerialException) as err:
+                print("LCD BENCH INCONCLUSIVE:",type(err).__name__)
         if args.seconds>0:
             print("Operate the physical keypad in Browser Overview now, when testing browser FPS.")
             gather(args.seconds)

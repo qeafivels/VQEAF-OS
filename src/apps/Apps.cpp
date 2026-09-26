@@ -1408,10 +1408,12 @@ void BrowserApp::enter(AppContext &ctx) {
   launchedFromPackage = ctx.pendingPackageLaunch;
   ctx.pendingPackageLaunch = false;
   if(ctx.system.safeMode() || !ctx.browser.available()) return;
+  if(!thumbs.ready())thumbs.begin(&ctx.storage);
   if (ctx.pendingBrowserUrl.length()) {
     String url=ctx.pendingBrowserUrl;ctx.pendingBrowserUrl="";
     ctx.ui.message("Opening application", "Qeafbrowser", url);
     ctx.browser.load(url);
+    resetMotion(ctx);
     if(ctx.browser.linkCount())selectedLink=0;
     return;
   }
@@ -1422,6 +1424,7 @@ void BrowserApp::enter(AppContext &ctx) {
 
 void BrowserApp::resetMotion(AppContext &ctx) {
   motion.reset(ctx.browser.lineCount());
+  nextThumb=0;lastThumbAttempt=0;
   offset=0;
 }
 
@@ -1464,13 +1467,14 @@ void BrowserApp::redrawOverview(AppContext &ctx) {
   d.setCursor(8,37);d.print("Page Overview");
   d.setCursor(192,37);d.printf("x%d",motion.zoomValue());
   const int left=12, top=56, width=212, height=210;
+  const int docHeight=ctx.browser.imageCount()>0?height-58:height;
   d.fillRect(left,top,width,height,c.panel);
   d.drawRect(left,top,width,height,c.dim);
   // Document preview is built from parsed line geometry without an extra
   // framebuffer. It is intentionally bounded to visible preview lines.
   const int scale=motion.zoomValue();
   const int lineHeight=max(2,8/scale);
-  const int shown=min(ctx.browser.lineCount(),(height-4)/lineHeight);
+  const int shown=min(ctx.browser.lineCount(),(docHeight-4)/lineHeight);
   const int first=min(max(0,motion.targetPixel()/16-shown/2),
                       max(0,ctx.browser.lineCount()-shown));
   for(int i=0;i<shown;++i){
@@ -1483,9 +1487,21 @@ void BrowserApp::redrawOverview(AppContext &ctx) {
   }
   int cursorY=top+3+(motion.targetPixel()/16-first)*lineHeight;
   int cursorH=max(8,(208/16)*lineHeight);
-  cursorY=constrain(cursorY,top+2,top+height-10);
-  if(cursorY+cursorH>top+height-2)cursorH=top+height-2-cursorY;
+  cursorY=constrain(cursorY,top+2,top+docHeight-10);
+  if(cursorY+cursorH>top+docHeight-2)cursorH=top+docHeight-2-cursorY;
   d.drawRect(left+2,cursorY,width-4,max(3,cursorH),c.accent);
+  // Up to three real JPEG/PNG previews. Missing/unverified images retain
+  // accessible text fallback; network fetch never occurs from this renderer.
+  for(int i=0;i<min(3,ctx.browser.imageCount());++i) {
+    const BrowserImage &img=ctx.browser.imageAt(i);
+    const int x=left+5+i*70,y=top+docHeight+4;
+    d.fillRect(x,y,64,48,c.bg);
+    if(!thumbs.draw(d,img.url,x,y)){
+      d.setTextColor(c.dim,c.bg);d.setCursor(x+4,y+19);
+      d.print("IMAGE");
+    }
+    d.drawRect(x,y,64,48,c.dim);
+  }
   d.fillRect(0,273,240,24,c.bg);
   d.setTextColor(c.dim,c.bg);d.setCursor(10,280);
   d.print("UP/DN Pan   LEFT/RIGHT Zoom");
@@ -1494,9 +1510,23 @@ void BrowserApp::redrawOverview(AppContext &ctx) {
 
 void BrowserApp::tick(AppContext &ctx,bool visible) {
   if(!visible || ctx.keyboard.active() || popup.open)return;
-  if(motion.tick(millis())) {
+  const uint32_t now=millis();
+  if(motion.tick(now)) {
     if(motion.overview())redrawOverview(ctx);
     else redrawBody(ctx);
+  }
+  // Fetch at most one verified image per interval, only in Overview, never
+  // on a draw callback. Failed requests are skipped until next page visit.
+  const int count=min(3,ctx.browser.imageCount());
+  if(motion.overview() && thumbs.ready() && statusWifi() &&
+     nextThumb<count && (uint32_t)(now-lastThumbAttempt)>=2000UL) {
+    lastThumbAttempt=now;
+    char url[192];
+    snprintf(url,sizeof(url),"%s",ctx.browser.imageAt(nextThumb++).url);
+    if(!thumbs.has(url)){
+      thumbs.prefetch(url);
+      redrawOverview(ctx);
+    }
   }
 }
 

@@ -51,6 +51,8 @@ checks={
  "Theme selection paints only prior/new row until scrollbar offset changes":
     "if (oldOffset != offset) draw(ctx);" in apps and
     "row(old, false); row(index, true);" in apps,
+ "Midnight never runs the multi-pass SPI stripe wipe after keypress":
+    "if(themeId==ThemeId::ModernDark)return;" in ui[ui.index("void SymbianUI::transitionOut()"):ui.index("void SymbianUI::openingApp(")],
  "No screen-wide transitional wipe when entering heavy routes":
     "if (animate && !heavyRoute && from != ScreenId::Launcher" in main,
  "Full-screen clear stays disabled for Lua compositor":

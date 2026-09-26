@@ -61,7 +61,7 @@ parser.add_argument("packages",nargs="*",type=Path,
 args=parser.parse_args()
 for file in args.packages:
     b=file.read_bytes()
-    assert b.startswith(b'QEAPP2\\r\\n')
+    assert b.startswith(b'QEAPP2\r\n')
     m,i,p=struct.unpack_from("<III",b,8)
     assert i==2048 and len(b)==116+m+i+p+76
     icon=b[116+m:116+m+i]

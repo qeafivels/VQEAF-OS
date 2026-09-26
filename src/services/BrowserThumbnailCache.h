@@ -26,7 +26,7 @@ private:
     uint32_t touched=0;
     bool valid=false;
   };
-  Tile slots[2];
+  Tile slots[3];
   bool initialized=false;
   bool flashReady=false;
   uint32_t accessCounter=1;

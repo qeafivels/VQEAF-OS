@@ -73,6 +73,8 @@ def main():
     ap.add_argument("--output",type=Path,default=Path("qb_hardware_results"))
     ap.add_argument("--keep-fixtures",action="store_true",help="Leave synthetic recovery artifacts for inspection")
     ap.add_argument("--bench",action="store_true",help="Trigger isolated 64-frame real TFT benchmark in PERF_DIAG")
+    ap.add_argument("--boot-settle",type=int,default=8,
+                    help="Read UART after DTR may reset ESP32 before sending diagnostics")
     args=ap.parse_args()
     args.output.mkdir(parents=True,exist_ok=True)
     stamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -117,6 +119,8 @@ def main():
                         if expect and expect in line:found=True
                 if found:return True
             return found
+        if args.boot_settle>0:
+            gather(min(args.boot_settle,30))
         if args.mode=="roundtrip":
             port_slot[0].write(b"diag qb stage\n")
             if not gather(12,"[QB][RECOVERY] stage=PASS"):
@@ -141,7 +145,8 @@ def main():
         if args.bench:
             try:
                 port_slot[0].write(b"diag qb bench\n")
-                gather(24,"[QB][HW][COMPARE]")
+                if not gather(24,"[QB][HW][COMPARE]"):
+                    print("LCD BENCH INCONCLUSIVE: benchmark record not received")
             except (OSError,serial.SerialException) as err:
                 print("LCD BENCH INCONCLUSIVE:",type(err).__name__)
         if args.seconds>0:

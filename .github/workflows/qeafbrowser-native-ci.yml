@@ -50,6 +50,7 @@ jobs:
       - name: Build stock and diagnostic ESP32-S3 N16R8 firmware
         run: |
           pio run -e vqeaf_os
+          pio run -e vqeaf_os_uart
           pio run -e vqeaf_perf_diag
       - name: Fetch official verified Lua 5.4.8 and run VM regression
         run: |

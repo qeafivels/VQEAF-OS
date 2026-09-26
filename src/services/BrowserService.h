@@ -28,6 +28,7 @@ public:
   static constexpr int MAX_LINES = 84;
   static constexpr int MAX_LINKS = 24;
   static constexpr int HISTORY_MAX = 16;
+  static constexpr int FORWARD_MAX = 12;
   static constexpr int BOOKMARK_MAX = 12;
 
   bool begin(StorageService *storage = nullptr);
@@ -35,6 +36,8 @@ public:
   bool load(const String &inputUrl);
   bool reload();
   bool goBack();
+  bool goForward();
+  bool canGoForward() const { return forwardUsed > 0; }
   bool openLink(int index);
   bool bookmarkCurrent();
   int bookmarkCount() const { return bookmarkUsed; }
@@ -63,6 +66,8 @@ private:
   BrowserLine *lines = nullptr;
   BrowserLink *links = nullptr;
   char (*history)[192] = nullptr;
+  char (*forward)[192] = nullptr;
+  int forwardUsed = 0;
   char (*bookmarks)[192] = nullptr;
   int bookmarkUsed = 0;
   bool poolsReady = false;

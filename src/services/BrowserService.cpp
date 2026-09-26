@@ -587,7 +587,7 @@ bool BrowserService::goBack() {
   snprintf(previous, sizeof(previous), "%s", history[0]);
   // Navigation stack changes are transactional even if HTTP/TLS fails.
   if (!fetchAndParse(target, false)) return false;
-  for (int i = 1; i < historyUsed - 1; ++i)
+  for (int i = 0; i < historyUsed - 1; ++i)
     memmove(history[i], history[i + 1], sizeof(history[0]));
   --historyUsed;
   const int last = min(forwardUsed, FORWARD_MAX - 1);
